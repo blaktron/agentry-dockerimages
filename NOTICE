@@ -53,7 +53,9 @@ naming them — see each upstream repository.
 | `agentry-docker-agent` | `docker/docker-agent:1.128.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
+| `agentry-harness-golang` | `golang:1.27.0-alpine3.23` | see upstream (Go: BSD-3; Alpine: MIT) |
 | `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
+| `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
 

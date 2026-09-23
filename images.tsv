@@ -1,8 +1,10 @@
 # The runtime images, one per line, tab-separated:
 #   <our name>  <upstream ref>  <upstream digest>  <kind>  <role>
+# Tab-separated so the scripts that read it need no parser.
 #
-# kind: `mirror` rows are copied unchanged by scripts/mirror.sh; `build` marks
-# an image built here from pinned upstream source under build/<name>/.
+# kind: `mirror` rows are copied unchanged by scripts/mirror.sh. `build` marks
+# an image we publish from our own build of pinned upstream source; the build
+# itself is scripts/build.sh <name>, from build/<name>/.
 #
 # Every upstream ref is pinned by digest. scripts/pin.sh reports tags that have
 # moved and never edits this file.

@@ -25,9 +25,9 @@ Three more mirrors are needed only to build `agentry-docker-agent-src`:
 our name, the upstream ref, the upstream digest, the kind and the role.
 
 The Agentry server's own images (Postgres, MinIO, Redis, the edge, authentik,
-OpenSearch) are not here. Neither are the runner image and the per-release
-exec and MCP-server images: the CLI builds those locally on the machine that
-runs them.
+OpenSearch, `secureagentryd`) are not here. Neither are the runner image and
+the per-release exec and MCP-server images: the CLI builds those locally on
+the machine that runs them.
 
 ## Digests
 
@@ -53,8 +53,10 @@ images:
   pythonRuntime: ghcr.io/blaktron/agentry-python-alpine:3.12-alpine
 ```
 
+To pin by digest, append `@sha256:…` from `images.tsv` to each ref.
 `alpine:3.22` has no policy field: it is the `FROM` of the runner image's
-Dockerfile in the CLI.
+Dockerfile in the CLI. The CLI's built-in defaults still name the upstream
+Docker Hub images.
 
 As of 2026-09-23 the packages are private, so pulling them needs a
 `docker login ghcr.io` with read access.
@@ -63,7 +65,7 @@ As of 2026-09-23 the packages are private, so pulling them needs a
 
 | Script | What it does |
 |---|---|
-| `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved. It does not edit `images.tsv`. |
+| `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, with every base taken from our mirrors. `PUSH=1` pushes the result. |
 
@@ -92,7 +94,9 @@ comparison. Our Dockerfile differs from it in four ways:
 The result is published as `agentry-docker-agent-src`, separate from the
 `agentry-docker-agent` mirror, so the two can be compared. It is built for the
 build host's platform only, while the mirror has linux/amd64 and linux/arm64.
-A build needs several GB of free disk.
+A build needs several GB of free disk. It replaces the mirror only after it
+passes the CLI's live runner acceptance tests; the `agentry-docker-agent` row
+in `images.tsv` then changes from `mirror` to `build`.
 
 ## Licence
 

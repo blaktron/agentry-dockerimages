@@ -17,9 +17,10 @@
 #      copies it from a digest.
 #   3. DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1 is set. v1.127.0 added a Docker
 #      Desktop PAC transport that attaches to the unguarded transport the model
-#      clients use. A run container lacks the socket it detects
-#      (/run/host-services/backend.sock), so it is inert there; the variable
-#      keeps it off regardless.
+#      clients use, bypassing the Docker-host allowlist. A run container lacks
+#      the socket it detects (/run/host-services/backend.sock), so it is inert
+#      there; the variable keeps the run's only route out through the proxy
+#      without relying on that (agentry-cli#223).
 #   4. Linux only: upstream's cross-compilation stages (tonistiigi/xx,
 #      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
 #      binary is still CGO with external linking, checked to be static, and
@@ -57,7 +58,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	  -X 'github.com/docker/docker-agent/pkg/version.Version=${GIT_TAG}' \
 	  -X 'github.com/docker/docker-agent/pkg/version.Commit=${GIT_COMMIT}'" \
 	-o /docker-agent .
-# Upstream runs `xx-verify --static`; this is the same check without xx.
+# Upstream runs `xx-verify --static`; this is the same check without xx. A
+# dynamically linked harness would depend on the runtime base's musl.
 RUN if ldd /docker-agent >/dev/null 2>&1; then \
 	echo "docker-agent is dynamically linked; upstream verifies --static" >&2; \
 	exit 1; \
