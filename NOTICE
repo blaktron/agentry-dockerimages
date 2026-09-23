@@ -16,7 +16,7 @@ terms are restated here.
     Upstream:   https://github.com/docker/docker-agent
     Commit:     1a0e7ffbcbad4b2cbdd690f48689e87fb0c69599  (tag v1.128.0)
     Licence:    Apache-2.0
-    Our image:  agentry-docker-agent
+    Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
 
 Copyright the Docker Agent authors. Licensed under the Apache License, Version

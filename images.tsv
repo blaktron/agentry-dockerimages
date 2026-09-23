@@ -31,3 +31,5 @@ agentry-python-alpine	python:3.12-alpine	sha256:4c47124a8391cb7a9f571164147d1547
 # in build/. Kept in the same manifest so every ref this repository touches is
 # pinned in one place.
 agentry-mcp-gateway-v2	docker/mcp-gateway:v2	sha256:54dd518ee51b5c4641b02ddd4790b88cc0dafa59d76b6d07bc441d896a23bbea	mirror	build-time only: upstream's docker-agent Dockerfile copies the /docker-mcp CLI plugin out of this floating v2 tag; we copy it out of a digest instead
+agentry-harness-alpine	alpine:3.23	sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0	mirror	build-time only: the runtime base of build/docker-agent/ — upstream builds the harness on alpine 3.23, while the runner image runs on 3.22
+agentry-harness-golang	golang:1.27.0-alpine3.23	sha256:3747dcba41c8b0db3211fda4db61638b980e17ac5bb3c94460a975a9cfe19395	mirror	build-time only: compiles build/docker-agent/; upstream pins Go 1.27.0 against alpine 3.23, whose musl the harness is statically linked against
