@@ -1,17 +1,27 @@
 # Mirror and build the BriefAgent runtime's images into our own registry.
 #
+# Manual dispatch only, and deliberately so. Mirroring is not a per-commit act:
+# it is what you do when a pin in images.tsv moves. Running it on every push
+# would also be unreliable from here — Docker Hub rate-limits anonymous pulls per
+# IP, and GitHub's runner ranges are shared and heavily used. A 429 on
+# `library/*` is exactly what blocked this repository's first build (see the
+# README), so an automatic run would go red for reasons that have nothing to do
+# with the change being merged. If this is ever made automatic, give it Docker
+# Hub credentials so it does not pull anonymously.
+#
 # Runs on GitHub-hosted runners, like the estate's release workflows: the
 # self-hosted fleet has a runner per repository and none is registered for this
-# one yet (see README, "What is not done"). Mirroring is idempotent and
-# digest-pinned, so a re-run copies nothing that is already there.
+# one yet. Mirroring is idempotent and digest-pinned, so a re-run copies nothing
+# that is already there.
 #
 # No secret is referenced. GHCR push uses the workflow's own GITHUB_TOKEN with
-# packages: write, which is enough for a registry namespace in the same org.
+# packages: write, which is enough for a namespace in the same account. Worth
+# knowing: a workflow push in a public repository creates PUBLIC packages by
+# default, which is the route past the private-package problem the README
+# describes — but only for packages that do not already exist.
 name: images
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -46,6 +56,22 @@ jobs:
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Docker Hub allows an anonymous client 100 pulls per hour per IP
+      # (`x-ratelimit-limit: 100;w=3600`, measured 2026-09-23), and one mirror
+      # run of nine multi-arch images exhausts that. Create these two secrets to
+      # lift it; without them the run still works, it just may 429.
+      - name: Log in to Docker Hub when credentials are configured
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          else
+            echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this pulls from Docker Hub anonymously: 100 pulls per hour per IP, which a full mirror run exceeds"
+          fi
 
       - name: Mirror every mirrored image
         run: ./scripts/mirror.sh

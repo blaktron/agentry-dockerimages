@@ -221,13 +221,35 @@ disk before starting one.
 
 **Docker Hub rate-limited us while doing it.** Resolving the two bases the
 harness build needs — `alpine:3.23` and `golang:1.27.0-alpine3.23` — returned
-`429 Too Many Requests` from `registry-1.docker.io/v2/library/…`, and still did
-on a retry afterwards. That is the anonymous per-IP limit on `library/*`,
-exhausted by a single mirror run on a single workstation. It is worth sitting
-with: a first run of the CLI pulls five `library/*` images anonymously from
-whatever IP the user happens to be on, and the estate's CI runners share one IP
-each. This is not a hypothetical failure mode — it happened here, mid-task,
-before anything had been published.
+`429 Too Many Requests` from `registry-1.docker.io/v2/library/…`, and kept doing
+so on retry. The response headers name the limit:
+
+```
+docker-ratelimit-source: <this machine's IP>
+x-ratelimit-limit: 100;w=3600
+```
+
+**One hundred pulls per hour per IP, anonymously.** A single mirror run of nine
+multi-arch images — each an index plus a manifest per platform — exhausts that,
+which is what happened here. It cleared on its own later the same day.
+
+Worth sitting with, because it is not only our problem: a first run of the CLI
+pulls five `library/*` images anonymously from whatever IP the user happens to be
+on — a shared NAT, a hotel, a university, an office behind one egress address —
+and each CI runner host shares one IP across every job it runs. That is an
+availability failure in the product with nothing to do with the agent, and
+mirroring is what removes it: a public GHCR package has no equivalent pull quota.
+
+The estate now has a Docker Hub account, and logging in lifts these pulls off the
+anonymous bucket — 200 per hour, and not shared with every other anonymous client
+behind the same address. `docker login` once and the scripts use it; none of them
+reads a credential, so nothing appears in a command line or a log. The workflow
+takes the same pair as `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets and warns
+rather than failing when they are absent.
+
+Note that `~/.docker/config.json` stores these base64-encoded, not encrypted,
+unless a credential helper is configured — `credsStore` is unset here. On a shared
+machine that file is a credential store in all but name.
 
 **Not done.**
 
