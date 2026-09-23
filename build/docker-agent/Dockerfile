@@ -1,40 +1,34 @@
 # syntax=docker/dockerfile:1
 #
-# Docker Agent, built by us from pinned upstream source.
+# Docker Agent, built from pinned upstream source.
 #
 #   upstream   github.com/docker/docker-agent
-#   commit     see source.env beside this file
+#   commit     source.env beside this file
 #   licence    Apache-2.0
-#   reference  upstream.Dockerfile beside this file is the vendor's own at that
-#              commit; read the diff against it
+#   reference  upstream.Dockerfile beside this file is the vendor's Dockerfile at
+#              that commit
 #
-# What we change from upstream, and why:
+# Changes from upstream:
 #
-#   1. Every base is an ARG, and scripts/build.sh passes our own digest-pinned
-#      mirrors for each. Nothing here resolves a mutable tag at build time, and
-#      the script refuses to build if a mirror is missing from images.tsv.
-#   2. Upstream's `COPY --from=docker/mcp-gateway:v2` is a floating major tag:
-#      two builds of the same commit can produce different images. Ours comes
-#      from a digest.
-#   3. DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1 is baked in. v1.127.0 added a
-#      Docker Desktop PAC transport which in code attaches to the *unguarded*
-#      transport the model clients use, skipping the Docker-host allowlist when
-#      guarded=false. It is inert in a run container — detection stats
-#      /run/host-services/backend.sock, which the agent container does not have
-#      — but "one route out through the proxy" is an invariant worth not
-#      leaving to circumstance (agentry-cli#223).
-#   4. Linux only, so upstream's cross-compilation machinery (tonistiigi/xx,
-#      crazymax/osxcross, zig, the builder-cross and darwin/windows paths) is
-#      dropped. The binary is still CGO with external linking, still verified
-#      static, still built with -tags no_audio and the same version ldflags.
+#   1. Every base is an ARG, and scripts/build.sh passes our digest-pinned
+#      mirror for each, so no mutable tag is resolved at build time.
+#   2. Upstream copies the docker-mcp plugin from the floating
+#      docker/mcp-gateway:v2 tag, so two builds of one commit can differ. Ours
+#      copies it from a digest.
+#   3. DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1 is set. v1.127.0 added a Docker
+#      Desktop PAC transport that attaches to the unguarded transport the model
+#      clients use. A run container lacks the socket it detects
+#      (/run/host-services/backend.sock), so it is inert there; the variable
+#      keeps it off regardless.
+#   4. Linux only: upstream's cross-compilation stages (tonistiigi/xx,
+#      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
+#      binary is still CGO with external linking, checked to be static, and
+#      built with -tags no_audio and the same version ldflags.
 #
-# Everything else is at parity with upstream deliberately — same packages, same
-# non-root user, same /data and /work, same ENTRYPOINT — so the runner's
-# conformance goldens, recorded against the vendor image's exact event stream,
-# still describe this one. Reducing the image further (it needs neither
-# docker-cli nor the docker-mcp plugin in a run, where the container has no
-# docker socket and every tool comes from our gateway) is a real follow-up, but
-# it is a behaviour change and needs a live run to prove, not an argument.
+# Everything else matches upstream (packages, non-root user, /data and /work,
+# ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
+# image, still apply. A run needs neither docker-cli nor the docker-mcp plugin;
+# removing them changes behaviour and needs a live run to confirm.
 
 ARG GO_IMAGE=golang:1.27.0-alpine3.23
 ARG ALPINE_IMAGE=alpine:3.23
@@ -44,12 +38,9 @@ ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 FROM ${GATEWAY_IMAGE} AS gateway
 
 FROM ${GO_IMAGE} AS builder
-# gcc, not just musl-dev: CGO_ENABLED=1 needs a C compiler and the Go alpine
-# images ship none — the first build of this context died on
-# `cgo: C compiler "gcc" not found`. Upstream gets one from its xx toolchain
-# (`apk add clang zig`, then XX_GO_PREFER_C_COMPILER=zig); without xx, gcc
-# against musl-dev is the standard Alpine static-linking pair. The ldd assertion
-# after the build is what actually proves the result stayed static.
+# CGO needs a C compiler and the Go alpine images ship none. Upstream uses zig
+# from its xx toolchain; without xx, gcc with musl-dev is the usual Alpine pair
+# for static linking. The ldd check after the build confirms the result.
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -66,8 +57,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	  -X 'github.com/docker/docker-agent/pkg/version.Version=${GIT_TAG}' \
 	  -X 'github.com/docker/docker-agent/pkg/version.Commit=${GIT_COMMIT}'" \
 	-o /docker-agent .
-# Upstream runs `xx-verify --static`; this is the same assertion without xx.
-# A dynamically linked harness would silently depend on the base's musl.
+# Upstream runs `xx-verify --static`; this is the same check without xx.
 RUN if ldd /docker-agent >/dev/null 2>&1; then \
 	echo "docker-agent is dynamically linked; upstream verifies --static" >&2; \
 	exit 1; \

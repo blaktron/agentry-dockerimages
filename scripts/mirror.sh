@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Copy every `mirror` row of images.tsv into our own registry, by digest.
 #
-# `docker buildx imagetools create` copies a manifest registry-to-registry:
-# the layers never come to this machine, and a multi-platform manifest list
-# survives intact, so what we publish is byte-identical to what upstream
-# published, for every architecture. Because the manifest bytes are copied
-# unchanged, THE DIGEST IS THE SAME on both sides — a consumer can pin
-# ghcr.io/blaktron/agentry-alpine@sha256:5291… and get exactly the bytes
-# alpine:3.22@sha256:5291… named. The script verifies that after each copy.
+# `docker buildx imagetools create` copies a manifest registry to registry.
+# The layers never come to this machine and a multi-platform manifest list is
+# copied whole, so the destination digest equals the upstream digest:
+# ghcr.io/blaktron/agentry-alpine@sha256:5291… is alpine:3.22@sha256:5291….
+# The script checks the digest after each copy.
 #
 # Usage:
 #   scripts/mirror.sh                 # every mirror row
