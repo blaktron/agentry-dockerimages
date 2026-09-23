@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Re-resolve every upstream ref in images.tsv and report where a tag has moved.
 #
-# This never edits images.tsv. A moved tag is a decision, not a routine: the
-# digest we pinned is the one that was reviewed, and moving it means re-reviewing
-# what changed. Read the report, then edit the manifest by hand and re-run
-# scripts/mirror.sh.
+# It never edits images.tsv. Moving a pin means reviewing what changed
+# upstream: edit the manifest by hand, then re-run scripts/mirror.sh.
 #
 # Usage: scripts/pin.sh
 set -euo pipefail
