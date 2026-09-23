@@ -1,25 +1,16 @@
-# The BriefAgent runtime's container images — the single source of truth.
-#
-# Tab-separated, one image per line:
+# The runtime images, one per line, tab-separated:
 #   <our name>  <upstream ref>  <upstream digest>  <kind>  <role>
+# Tab-separated so the scripts that read it need no parser.
 #
-# `kind` is `mirror` (the upstream bytes are copied into our registry unchanged)
-# or `build` (we build the image ourselves from pinned upstream source, under
-# build/<name>/). scripts/mirror.sh acts on `mirror` rows, scripts/build.sh on
-# `build` rows.
+# kind: `mirror` rows are copied unchanged by scripts/mirror.sh. `build` marks
+# an image we publish from our own build of pinned upstream source; the build
+# itself is scripts/build.sh <name>, from build/<name>/.
 #
-# Every upstream ref is pinned by DIGEST. A tag is mutable: the runner's own
-# policy defaults are tags, and their comment concedes the CLI "cannot know
-# digest values ahead of time" (agentry-cli/pkg/runner/policy/policy.go:33).
-# Here we can, so we do. Re-resolve with scripts/pin.sh, which prints a diff
-# and never edits this file silently.
+# Every upstream ref is pinned by digest. scripts/pin.sh reports tags that have
+# moved and never edits this file.
 #
-# A tab-separated file rather than YAML on purpose: this is a supply-chain
-# manifest, and the script that reads it should be auditable without a parser.
-#
-# Scope: the RUNTIME plane only. The SecureAgentry application's images
-# (postgres, minio, redis, the edge, authentik, opensearch, secureagentryd)
-# are not here — they belong to the application's compose stack and helm chart.
+# The Agentry server's own images (postgres, minio, redis, the edge, authentik,
+# opensearch, secureagentryd) are not listed here.
 agentry-mcp-gateway	docker/mcp-gateway:v0.43.3	sha256:e3ee13818cb067a506c5e9acdb2bb4fe0e601caef7d116fc329755782f1a3cfa	mirror	the tool plane: Docker's MCP gateway, started once per run with --block-network (policy images.gateway)
 agentry-docker-agent	docker/docker-agent:1.128.0	sha256:50bef17dfbc43c56f8c7c68eade9fc36cd4de5a2fc7ad0f28e34d0030002d5f1	mirror	the default harness, the agent program that talks to the model (policy images.harnessDockerAgent); build/docker-agent/ is the from-source replacement, not yet the published image
 agentry-golang-alpine	golang:1.27-alpine	sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414	mirror	builds the local runner image: the GO_IMAGE build-arg of runnerimage/Dockerfile (policy images.goBuilder)
@@ -27,9 +18,7 @@ agentry-alpine	alpine:3.22	sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871
 agentry-node-alpine	node:22-alpine	sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85	mirror	installs and runs a BriefAgent's declared npm MCP servers (policy images.nodeRuntime)
 agentry-python-alpine	python:3.12-alpine	sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111	mirror	installs and runs a BriefAgent's declared PyPI MCP servers (policy images.pythonRuntime)
 #
-# Build-time dependencies: not pulled by a run, needed only to build an image
-# in build/. Kept in the same manifest so every ref this repository touches is
-# pinned in one place.
+# Build-time only: not pulled by a run, needed to build an image in build/.
 agentry-mcp-gateway-v2	docker/mcp-gateway:v2	sha256:54dd518ee51b5c4641b02ddd4790b88cc0dafa59d76b6d07bc441d896a23bbea	mirror	build-time only: upstream's docker-agent Dockerfile copies the /docker-mcp CLI plugin out of this floating v2 tag; we copy it out of a digest instead
 agentry-harness-alpine	alpine:3.23	sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0	mirror	build-time only: the runtime base of build/docker-agent/ — upstream builds the harness on alpine 3.23, while the runner image runs on 3.22
 agentry-harness-golang	golang:1.27.0-alpine3.23	sha256:3747dcba41c8b0db3211fda4db61638b980e17ac5bb3c94460a975a9cfe19395	mirror	build-time only: compiles build/docker-agent/; upstream pins Go 1.27.0 against alpine 3.23, whose musl the harness is statically linked against

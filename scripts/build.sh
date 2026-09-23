@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Build an image in build/ from pinned upstream source.
 #
-# Refuses to build when any base the context needs is not mirrored into our own
-# registry. A build that resolves a mutable tag from a public registry is the
-# thing this repository exists to stop, and it would leave the result
-# unreproducible even though the source commit is pinned.
+# Refuses to build when a base the context needs is not mirrored into our
+# registry: a base resolved from a mutable public tag would make the build
+# unreproducible even with the source commit pinned.
 #
 # Usage:
 #   scripts/build.sh <name>          # build build/<name>/, do not push
