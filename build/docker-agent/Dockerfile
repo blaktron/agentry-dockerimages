@@ -44,7 +44,13 @@ ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 FROM ${GATEWAY_IMAGE} AS gateway
 
 FROM ${GO_IMAGE} AS builder
-RUN apk add --no-cache musl-dev
+# gcc, not just musl-dev: CGO_ENABLED=1 needs a C compiler and the Go alpine
+# images ship none — the first build of this context died on
+# `cgo: C compiler "gcc" not found`. Upstream gets one from its xx toolchain
+# (`apk add clang zig`, then XX_GO_PREFER_C_COMPILER=zig); without xx, gcc
+# against musl-dev is the standard Alpine static-linking pair. The ldd assertion
+# after the build is what actually proves the result stayed static.
+RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download

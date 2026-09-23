@@ -181,42 +181,107 @@ each destination digest equal to its upstream digest:
 | `agentry-node-alpine:22-alpine` | `sha256:b6f26b36…` |
 | `agentry-python-alpine:3.12-alpine` | `sha256:4c47124a…` |
 | `agentry-mcp-gateway-v2:v2` | `sha256:54dd518e…` |
+| `agentry-harness-alpine:3.23` | `sha256:85fe1e81…` |
+| `agentry-harness-golang:1.27.0-alpine3.23` | `sha256:3747dcba…` |
+
+**Built and verified.** `agentry-docker-agent-src:1.128.0`
+(`sha256:8a0168668e6c…`) is the harness compiled by `build/docker-agent/` from
+upstream commit `1a0e7ff…`, with all three of its bases resolved from our own
+registry rather than from Docker Hub. Verified before pushing:
+
+- the in-build `ldd` assertion passed, so the binary is static;
+- `User=docker-agent` (non-root), `ENTRYPOINT [/docker-agent]`,
+  `WORKDIR /work` — parity with the vendor image;
+- `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is baked in, which no vendor image
+  carries;
+- run offline under `--network none`, it prints `docker-agent version v1.128.0`
+  and `Commit: 1a0e7ffbcbad4b2cbdd690f48689e87fb0c69599`, so the pinned commit
+  is what was compiled, and the binary starts and links.
+
+It is published under its **own** package name deliberately.
+`agentry-docker-agent` holds the digest-verified mirror of the vendor's bytes —
+the one artefact we can prove is identical to what upstream published. Pushing a
+from-source build over the same tag would destroy that comparison and leave the
+tag ambiguous about which of the two it named. This build is also
+single-platform, the host's, where the mirror carries amd64 and arm64.
+
+Running it confirmed two things the source reading had only suggested: it prints
+*"We collect anonymous usage data to help improve docker agent. To disable:"*,
+so the run plan's `TELEMETRY_ENABLED=false` is load-bearing rather than
+precautionary; and it names a feedback endpoint at `docker.qualtrics.com`, one
+more host the run's proxy allowlist has to be the answer to.
+
+Two lessons from that first build, both now encoded rather than remembered. It
+failed on `cgo: C compiler "gcc" not found` — the Go alpine images ship no
+compiler, and upstream gets one from the `xx` toolchain this context drops, so
+`gcc musl-dev` is installed explicitly. And it failed on `no space left on
+device`: the volume genuinely filled, and `docker builder prune -f` reclaimed
+about 12 GB. A from-source harness build needs several GB of headroom; check the
+disk before starting one.
 
 **Docker Hub rate-limited us while doing it.** Resolving the two bases the
 harness build needs — `alpine:3.23` and `golang:1.27.0-alpine3.23` — returned
-`429 Too Many Requests` from `registry-1.docker.io/v2/library/…`, and still did
-on a retry afterwards. That is the anonymous per-IP limit on `library/*`,
-exhausted by a single mirror run on a single workstation. It is worth sitting
-with: a first run of the CLI pulls five `library/*` images anonymously from
-whatever IP the user happens to be on, and the estate's CI runners share one IP
-each. This is not a hypothetical failure mode — it happened here, mid-task,
-before anything had been published.
+`429 Too Many Requests` from `registry-1.docker.io/v2/library/…`, and kept doing
+so on retry. The response headers name the limit:
+
+```
+docker-ratelimit-source: <this machine's IP>
+x-ratelimit-limit: 100;w=3600
+```
+
+**One hundred pulls per hour per IP, anonymously.** A single mirror run of nine
+multi-arch images — each an index plus a manifest per platform — exhausts that,
+which is what happened here. It cleared on its own later the same day.
+
+Worth sitting with, because it is not only our problem: a first run of the CLI
+pulls five `library/*` images anonymously from whatever IP the user happens to be
+on — a shared NAT, a hotel, a university, an office behind one egress address —
+and each CI runner host shares one IP across every job it runs. That is an
+availability failure in the product with nothing to do with the agent, and
+mirroring is what removes it: a public GHCR package has no equivalent pull quota.
+
+The estate now has a Docker Hub account, and logging in lifts these pulls off the
+anonymous bucket — 200 per hour, and not shared with every other anonymous client
+behind the same address. `docker login` once and the scripts use it; none of them
+reads a credential, so nothing appears in a command line or a log. The workflow
+takes the same pair as `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets and warns
+rather than failing when they are absent.
+
+Note that `~/.docker/config.json` stores these base64-encoded, not encrypted,
+unless a credential helper is configured — `credsStore` is unset here. On a shared
+machine that file is a credential store in all but name.
 
 **Not done.**
 
-- The harness is **not built from source yet**. `build/docker-agent/` is written
-  and `scripts/build.sh` refuses to run it, correctly, naming the two bases that
-  are not mirrored. Unblock it by pinning `alpine:3.23` and
-  `golang:1.27.0-alpine3.23` in `images.tsv`, which needs a Hub pull that is not
-  rate-limited or an authenticated one.
+- **The packages are private, and this is the blocker on using any of it.** An
+  anonymous manifest fetch returns `403` for every one of them, including those
+  pushed *after* this repository was made public: making the repo public does not
+  make the packages public, and a package created by a manual `docker push` is
+  private whatever the repository says. They cannot be flipped by API with the
+  tokens here — `PATCH /users/blaktron/packages/container/<name>` returns `404`,
+  because every package reports `repository: null`, i.e. unlinked. Each needs a
+  one-time **Package settings → link to this repository → Change visibility →
+  Public**. Until then nothing shipped can point at them, and a default that did
+  would mean no one could run a BriefAgent without a GHCR token.
 - **Nothing consumes these yet.** The CLI's `policy.Default*Image` constants
   still name the public refs — see "The defaults have not moved" above. The
-  estate's own machines can point at these by policy today.
+  estate's own machines can point at these by policy today, once the packages are
+  readable.
+- **No live run of the built harness.** It starts, reports the right version and
+  commit, and is static — but it has not driven a BriefAgent. The gate before its
+  `images.tsv` row flips from `mirror` to `build` is `scripts/acceptance/runner-r2.sh`
+  and `runner-r4.sh` in `agentry-cli`, and those need a model key.
 - **No self-hosted runner** is registered for this repository, so the workflow
-  runs on `ubuntu-latest` like the estate's release workflows. The fleet has a
-  runner per repository and none here.
-- **The packages are private**, because this repository is. They must be public
-  before any shipped default points at them.
+  runs on `ubuntu-latest` like the estate's release workflows. Worth knowing: a
+  workflow push in a *public* repository creates public packages by default, so
+  routing publication through CI is also a way past the visibility problem for
+  any package not yet created.
 - **No build attestations** (provenance, SBOM). `opencode`'s official image
   carries both; that is the bar to meet.
 - The images are **not reduced**. The harness still carries `docker-cli` and the
   `docker-mcp` CLI plugin, neither of which a run can use — the agent container
   has no docker socket and every tool comes from our gateway. Dropping them is a
-  behaviour change that needs a live run to prove, and no model key was
-  available to make one.
-- `scripts/build.sh` has **never completed a build**, so it is unproven beyond
-  its refusal path. Its exit code and its base-resolution were verified; the
-  clone-and-build path was not reached.
+  behaviour change that needs a live run to prove, not an argument.
 
 ## Licence and attribution
 
