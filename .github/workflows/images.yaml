@@ -1,0 +1,64 @@
+# Mirror and build the BriefAgent runtime's images into our own registry.
+#
+# Runs on GitHub-hosted runners, like the estate's release workflows: the
+# self-hosted fleet has a runner per repository and none is registered for this
+# one yet (see README, "What is not done"). Mirroring is idempotent and
+# digest-pinned, so a re-run copies nothing that is already there.
+#
+# No secret is referenced. GHCR push uses the workflow's own GITHUB_TOKEN with
+# packages: write, which is enough for a registry namespace in the same org.
+name: images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO: SHA-pin, per the convention agentry-cli#165 established. Tags are
+      # used here because this workflow was written without a way to look up the
+      # current commit SHAs, and an invented SHA is worse than an unpinned tag.
+      - uses: actions/checkout@v4
+
+      - name: Check the manifest
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS=$'\t' read -r name upstream digest kind role; do
+            case "$digest" in
+              sha256:*) ;;
+              *) echo "not pinned by digest: $name ($digest)"; bad=1 ;;
+            esac
+            [ -n "$role" ] || { echo "no role recorded: $name"; bad=1; }
+          done < <(grep -vE '^[[:space:]]*(#|$)' images.tsv)
+          [ "$bad" -eq 0 ]
+
+      - name: Report which upstream tags have moved
+        run: ./scripts/pin.sh
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Mirror every mirrored image
+        run: ./scripts/mirror.sh
+
+      - name: Build every built image
+        run: |
+          set -euo pipefail
+          for ctx in build/*/; do
+            name=$(basename "$ctx")
+            echo "::group::$name"
+            PUSH=1 ./scripts/build.sh "$name" || {
+              echo "::error::build/$name failed or is blocked on an unmirrored base"
+              exit 1
+            }
+            echo "::endgroup::"
+          done

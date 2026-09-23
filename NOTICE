@@ -1,0 +1,70 @@
+# Notices
+
+The scripts, build contexts and manifest in this repository are ours, under the
+MIT licence in `LICENSE`.
+
+Everything this repository **mirrors** or **builds from source** keeps its own
+licence. Mirroring does not create a derivative work — the bytes are unchanged
+and the destination digest equals the source digest, which `scripts/mirror.sh`
+verifies — but the components we build from source are redistributed, so their
+terms are restated here.
+
+## Built from source
+
+### Docker Agent
+
+    Upstream:   https://github.com/docker/docker-agent
+    Commit:     1a0e7ffbcbad4b2cbdd690f48689e87fb0c69599  (tag v1.128.0)
+    Licence:    Apache-2.0
+    Our image:  agentry-docker-agent
+    Context:    build/docker-agent/
+
+Copyright the Docker Agent authors. Licensed under the Apache License, Version
+2.0; a copy is at http://www.apache.org/licenses/LICENSE-2.0. Upstream carries no
+`NOTICE` file, so there are no additional attribution terms to relay.
+
+**Changes we make** (Apache-2.0 §4(b) requires that modified files carry a
+statement of the changes; `build/docker-agent/Dockerfile` states them in full):
+
+1. Every base image resolves from our own registry by digest rather than a
+   mutable public tag.
+2. Upstream's floating `COPY --from=docker/mcp-gateway:v2` becomes a
+   digest-pinned copy.
+3. `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set, closing the Docker Desktop PAC
+   transport path that v1.127.0 attached to the unguarded transport the model
+   clients use.
+4. The cross-compilation stages (`tonistiigi/xx`, `crazymax/osxcross`, zig, and
+   the darwin/windows paths) are dropped; this builds Linux only. The binary is
+   still CGO with external linking and still asserted static.
+
+Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
+as a Docker product, and the name "Docker Agent" is used only to identify the
+upstream component.
+
+## Mirrored unchanged
+
+Each of these is copied byte-for-byte; the destination digest equals the
+upstream digest. Their licences are their own, and are not restated here beyond
+naming them — see each upstream repository.
+
+| Our image | Upstream | Licence |
+|---|---|---|
+| `agentry-mcp-gateway` | `docker/mcp-gateway:v0.43.3` | see upstream |
+| `agentry-docker-agent` | `docker/docker-agent:1.128.0` | Apache-2.0 |
+| `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
+| `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
+| `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
+| `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
+| `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
+
+"See upstream" means this repository has not audited the full dependency licence
+set of that image, and does not claim to. Mirroring preserves whatever terms the
+publisher shipped under; it does not relicense anything.
+
+## Not covered by this file
+
+The images the runner builds **locally on the machine that runs it** — `agentry-runner`
+from `agentry-cli/runnerimage/`, the per-release exec images, and the per-release
+MCP-server install images — are built by the CLI from contexts embedded in its
+own binary, under that repository's licence. This repository changes where their
+*bases* come from, not what they are.
