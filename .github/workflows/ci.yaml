@@ -1,0 +1,47 @@
+# Check every pull request, and every push to dev and main, without a
+# registry: scripts/check.sh (the manifest, the scripts, the workflows, the
+# build contexts' base refs) and its self-test.
+#
+# Runs on a GitHub-hosted runner. This repository is public, so the runner is
+# free, and it is a fresh virtual machine per job: a pull request from a fork
+# runs its own code there, never on a persistent machine, holding a read-only
+# token and no secrets. scripts/check.sh fails if a job here moves to a
+# self-hosted runner without the guard that keeps fork pull requests off it.
+#
+# It pulls no image and logs in to nothing, so Docker Hub's anonymous rate
+# limit cannot turn it red.
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # TODO: pin by commit SHA.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Which shellcheck and PyYAML the check ran with.
+      - name: Tools
+        run: |
+          shellcheck --version | head -2
+          python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+
+      - name: Check the repository
+        run: ./scripts/check.sh
+
+      - name: The check fails on each rule it enforces
+        run: ./scripts/check.sh --self-test

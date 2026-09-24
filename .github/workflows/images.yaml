@@ -24,18 +24,9 @@ jobs:
       # TODO: pin by commit SHA (agentry-cli#165).
       - uses: actions/checkout@v4
 
-      - name: Check the manifest
-        run: |
-          set -euo pipefail
-          bad=0
-          while IFS=$'\t' read -r name upstream digest kind role; do
-            case "$digest" in
-              sha256:*) ;;
-              *) echo "not pinned by digest: $name ($digest)"; bad=1 ;;
-            esac
-            [ -n "$role" ] || { echo "no role recorded: $name"; bad=1; }
-          done < <(grep -vE '^[[:space:]]*(#|$)' images.tsv)
-          [ "$bad" -eq 0 ]
+      # The same check the ci workflow runs on every pull request.
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
 
       - name: Report which upstream tags have moved
         run: ./scripts/pin.sh
