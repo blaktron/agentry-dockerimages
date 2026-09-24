@@ -74,3 +74,4 @@ jobs:
             }
             echo "::endgroup::"
           done
+jobs: [
