@@ -67,11 +67,16 @@ As of 2026-09-23 the packages are private, so pulling them needs a
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows and the build contexts' base refs, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, with every base taken from our mirrors. `PUSH=1` pushes the result. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
 no credentials: run `docker login ghcr.io` first, and `docker login` for
 Docker Hub, whose anonymous pulls are limited to 100 an hour per IP.
+
+The `ci` workflow runs `scripts/check.sh` and its self-test on every pull
+request and every push to `dev` and `main`, on a GitHub-hosted runner. It
+pulls no image and needs no credentials.
 
 The `images` workflow runs the same steps. It is started by hand, and it logs
 in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets
