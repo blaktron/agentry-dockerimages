@@ -40,9 +40,65 @@ destination digest after each copy and fails if it differs. Pin by digest:
 ghcr.io/blaktron/agentry-alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 ```
 
-## Using the images
+## Who pulls these
 
-Point the runner's operator policy (`~/.agentry/runner/policy.yaml`) at them:
+Since 2026-09-23 the Agentry CLI's built-in defaults name these images
+(agentry-cli#231, recorded as register entry DR-32), so an ordinary
+`agentry run` uses them with nothing to configure:
+
+- The runner image is built on `agentry-golang-alpine` and `agentry-alpine`.
+- The gateway is pulled.
+- `agentry-docker-agent` is pulled when the default harness is used.
+- `agentry-node-alpine` or `agentry-python-alpine` is pulled when a BriefAgent
+  declares npm or PyPI MCP servers.
+
+The desktop app and Agentry's hosted runs use the same defaults, but they
+move later:
+
+- The desktop embeds a pinned version of the CLI's code and moves when that
+  pin is bumped.
+- Hosted runs move when their installed CLI is updated.
+
+The defaults moved off Docker Hub for two reasons:
+
+- Docker Hub limits anonymous pulls, and a first run pulls at least four
+  images from whatever address the user is on.
+- The harness holds the model API key, and it arrived by a tag that only its
+  vendor controlled.
+
+The tags here are ours, and each was verified against the upstream digest
+when it was mirrored. They are still tags (see "Repointing the images").
+
+The CLI moved on 2026-09-23, once the six packages below were public.
+
+## Public and private packages
+
+Six packages are public, so pulling them needs no login. These are the ones a
+run pulls:
+
+- `agentry-mcp-gateway`
+- `agentry-docker-agent`
+- `agentry-golang-alpine`
+- `agentry-alpine`
+- `agentry-node-alpine`
+- `agentry-python-alpine`
+
+Four packages are private:
+
+- `agentry-mcp-gateway-v2`, `agentry-harness-alpine` and
+  `agentry-harness-golang`, the build-time bases of `build/docker-agent/`
+- `agentry-docker-agent-src`, that build's output, which nothing uses yet
+
+A run never pulls these four. Building `build/docker-agent/` needs a
+`docker login ghcr.io` with read access.
+
+Both groups were checked with an anonymous manifest fetch on 2026-09-24.
+
+## Repointing the images
+
+The CLI's defaults are tags, not digests. An operator who wants their own
+registry, or digest pins, sets them in the runner's operator policy
+(`~/.agentry/runner/policy.yaml`):
 
 ```yaml
 images:
@@ -54,12 +110,13 @@ images:
 ```
 
 To pin by digest, append `@sha256:…` from `images.tsv` to each ref.
-`alpine:3.22` has no policy field: it is the `FROM` of the runner image's
-Dockerfile in the CLI. The CLI's built-in defaults still name the upstream
-Docker Hub images.
 
-As of 2026-09-23 the packages are private, so pulling them needs a
-`docker login ghcr.io` with read access.
+The runner image's two bases are set differently. `goBuilder` becomes the
+`GO_IMAGE` build argument of the CLI's `runnerimage/Dockerfile`.
+`agentry-alpine` is that Dockerfile's `RUNTIME_IMAGE` argument, and it has no
+policy field. The CLI passes only `GO_IMAGE` when it builds, so the runtime
+base is the default built into the CLI and cannot be changed from
+`policy.yaml`.
 
 ## Scripts
 
@@ -72,7 +129,10 @@ As of 2026-09-23 the packages are private, so pulling them needs a
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
 no credentials: run `docker login ghcr.io` first, and `docker login` for
-Docker Hub, whose anonymous pulls are limited to 100 an hour per IP.
+Docker Hub. Docker Hub allows 100 anonymous pulls per IP, and its sources
+disagree about the window. The registry's response header says one hour
+(`ratelimit-limit: 100;w=3600`), while Docker's documentation says six
+hours. Both were checked on 2026-09-24. A full mirror run can exceed either.
 
 The `ci` workflow runs `scripts/check.sh` and its self-test on every pull
 request and every push to `dev` and `main`, on a GitHub-hosted runner. It
