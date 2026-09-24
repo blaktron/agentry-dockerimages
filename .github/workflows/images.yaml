@@ -35,9 +35,10 @@ jobs:
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # Anonymous Docker Hub pulls are limited to 100 an hour per IP
-      # (measured 2026-09-23), which a full mirror run exceeds. Set these two
-      # secrets to pull as an account; without them the run may hit a 429.
+      # Docker Hub allows 100 anonymous pulls per IP: an hour by its response
+      # header, six hours by its documentation. A full mirror run can exceed
+      # either. Set these two secrets to pull as an account; without them the
+      # run may hit a 429.
       - name: Log in to Docker Hub when credentials are configured
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -47,7 +48,7 @@ jobs:
           if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
             printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
           else
-            echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this pulls from Docker Hub anonymously: 100 pulls per hour per IP, which a full mirror run exceeds"
+            echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this pulls from Docker Hub anonymously, limited to 100 pulls per IP, which a full mirror run can exceed"
           fi
 
       - name: Mirror every mirrored image
