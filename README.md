@@ -1,6 +1,6 @@
 # agentry-dockerimages
 
-The container images the Agentry BriefAgent runtime runs, published to
+The container images the Agentry QuickAgent runtime runs, published to
 `ghcr.io/blaktron`. Each image is either a mirror of an upstream image, copied
 unchanged and pinned by digest, or built here from a pinned upstream commit.
 
@@ -49,7 +49,7 @@ Since 2026-09-23 the Agentry CLI's built-in defaults name these images
 - The runner image is built on `agentry-golang-alpine` and `agentry-alpine`.
 - The gateway is pulled.
 - `agentry-docker-agent` is pulled when the default harness is used.
-- `agentry-node-alpine` or `agentry-python-alpine` is pulled when a BriefAgent
+- `agentry-node-alpine` or `agentry-python-alpine` is pulled when a QuickAgent
   declares npm or PyPI MCP servers.
 
 The desktop app and Agentry's hosted runs use the same defaults, but they

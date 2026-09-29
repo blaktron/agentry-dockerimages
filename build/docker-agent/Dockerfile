@@ -81,4 +81,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit, for the BriefAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit, for the QuickAgent runtime's default harness"
