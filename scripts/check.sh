@@ -11,15 +11,28 @@
 #   - a job on a self-hosted runner can be reached by a pull request from a
 #     fork: this repository is public, and a self-hosted runner persists
 #     between jobs, so such a job must carry the fork guard below;
-#   - a build context's bases.env names a ref that has no row in images.tsv.
+#   - a build context's bases.env names a ref that has no row in images.tsv;
+#   - the Unsafe Mode image's index generator fails its self-test, or its
+#     extras list is not the closed recipe set (build/agentry-unsafe-kali).
 #
-# It pulls nothing and reads no credential.
+# It pulls nothing and reads no credential, except in --unsafe-image mode,
+# which runs the image it names.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
 #   scripts/check.sh --self-test  # break each rule in a copy and expect a failure
+#   scripts/check.sh --unsafe-image <ref>
+#       read the command index and the extras list out of a built
+#       agentry-unsafe-kali and assert that every command in
+#       build/agentry-unsafe-kali/fixture-commands.txt resolves through one of
+#       them (plan unsafe-mode.md §4.1), and list the commands the index left
+#       out as ambiguous. This one pulls and runs the image: CONTAINER names
+#       the runtime (default docker; Apple's `container` on the Mac build
+#       host), and PLATFORM (e.g. linux/arm64) asks for, and checks, one
+#       architecture. It runs under macOS's bash 3.2.
 #
-# Needs bash, awk, shellcheck, and python3 with PyYAML.
+# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image needs
+# a container runtime instead.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -116,9 +129,58 @@ checkBases() {
 	return "$bad"
 }
 
+UNSAFE_CTX=build/agentry-unsafe-kali
+
+checkUnsafe() {
+	local bad=0
+	python3 "$UNSAFE_CTX/make-index.py" --self-test || bad=1
+	python3 "$UNSAFE_CTX/make-index.py" --check-extras "$UNSAFE_CTX/extras.tsv" || bad=1
+	return "$bad"
+}
+
+# unsafeImage reads the two files out of the image and resolves each fixture
+# command the way the CLI will: the extras list first, then the index.
+unsafeImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" arch want tmp cmd how bad=0 n=0
+	local run=("$runtime" run --rm)
+	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
+	tmp=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: tmp is local
+	trap "rm -rf '$tmp'" EXIT
+	"${run[@]}" "$ref" cat /etc/agentry/unsafe/commands.tsv >"$tmp/commands.tsv"
+	"${run[@]}" "$ref" cat /etc/agentry/unsafe/extras.tsv >"$tmp/extras.tsv"
+	"${run[@]}" "$ref" cat /etc/agentry/unsafe/ambiguous.tsv >"$tmp/ambiguous.tsv"
+	arch=$("${run[@]}" "$ref" dpkg --print-architecture)
+	if [ -n "${PLATFORM:-}" ]; then
+		want="${PLATFORM##*/}"
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref: asked for $PLATFORM, the image is $arch"
+			bad=1
+		fi
+	fi
+	echo "$ref ($arch): $(grep -vc '^#' "$tmp/commands.tsv") commands indexed, $(grep -vc '^#' "$tmp/ambiguous.tsv") ambiguous and left out:"
+	# The ambiguities, as command(packages), wrapped: the plan has check.sh
+	# report what the index leaves out rather than guess.
+	awk -F'\t' '!/^#/ { printf "%s(%s) ", $1, $2 } END { print "" }' "$tmp/ambiguous.tsv" | fold -s -w 100 | sed 's/^/     /'
+	while read -r cmd; do
+		case "$cmd" in '' | \#*) continue ;; esac
+		n=$((n + 1))
+		how=$(awk -F'\t' -v c="$cmd" '!/^#/ && $2 == c { print "extras " $1 " " $3 (NF > 3 ? " " $4 : ""); exit }' "$tmp/extras.tsv")
+		[ -n "$how" ] || how=$(awk -F'\t' -v c="$cmd" '!/^#/ && $1 == c { print "index " $2; exit }' "$tmp/commands.tsv")
+		if [ -n "$how" ]; then
+			printf 'ok   %-16s %s\n' "$cmd" "$how"
+		else
+			printf 'FAIL %-16s resolves through neither the extras list nor the index\n' "$cmd"
+			bad=1
+		fi
+	done <"$UNSAFE_CTX/fixture-commands.txt"
+	[ "$bad" -eq 0 ] && echo "ok   all $n fixture commands resolve on $arch"
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -140,6 +202,7 @@ shellcheck checkScripts
 workflow checkWorkflows
 fork checkWorkflows
 bases checkBases
+extras checkUnsafe
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -154,6 +217,7 @@ breakCase() {
 	workflow) printf 'jobs: [\n' >>.github/workflows/ci.yaml ;;
 	fork) sed -i 's/runs-on: ubuntu-latest/runs-on: [self-hosted, linux, x64]/' .github/workflows/ci.yaml ;;
 	bases) printf 'EXTRA_IMAGE=example/unmirrored:1\n' >>build/docker-agent/bases.env ;;
+	extras) printf 'pip\tx\tx>=1\n' >>build/agentry-unsafe-kali/extras.tsv ;;
 	esac
 }
 
@@ -187,9 +251,16 @@ selfTest() {
 
 case "${1:-}" in
 --self-test) selfTest ;;
+--unsafe-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --unsafe-image <ref>" >&2
+		exit 2
+	}
+	unsafeImage "$2"
+	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref>]" >&2
 	exit 2
 	;;
 esac

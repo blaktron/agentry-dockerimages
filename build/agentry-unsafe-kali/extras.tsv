@@ -1,0 +1,25 @@
+# The extras list (plan unsafe-mode.md §4.1, D3, D8): recipes for a declared
+# command that no Kali package puts on PATH. A closed set of two kinds,
+# tab-separated, one command per row:
+#
+#   pip   <command>  <pypi-name>==<exact version>
+#   link  <command>  <kali package>  <path inside the package, as Contents lists it>
+#
+# The CLI (Unsafe Mode M2) installs a pip row into /opt/agentry/venv and
+# links its command into /usr/local/bin, and links a link row's path into
+# /usr/local/bin once the package is installed. make-index.py refuses any
+# other kind or shape, and a link path the package does not ship, on each
+# architecture the image is built for. The CLI resolves a declared command
+# here first, then in the index.
+#
+# Maintained by hand. A row is added when a published QuickAgent needs a tool
+# that no package ships, with the reason beside it.
+
+# Python 2.7-3.8 bytecode decompilers, not packaged by Kali or Debian.
+# They install and start on Kali's python3 (3.14), checked 2026-09-30.
+pip	decompyle3	decompyle3==3.9.3
+pip	uncompyle6	uncompyle6==3.9.3
+# Ghidra's headless analyzer ships in Kali's ghidra package under
+# usr/share/ghidra, off PATH (read from Contents-amd64 and Contents-arm64,
+# 2026-09-30).
+link	analyzeHeadless	ghidra	usr/share/ghidra/support/analyzeHeadless
