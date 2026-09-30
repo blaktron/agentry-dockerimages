@@ -175,6 +175,21 @@ unsafeImage() {
 		fi
 	done <"$UNSAFE_CTX/fixture-commands.txt"
 	[ "$bad" -eq 0 ] && echo "ok   all $n fixture commands resolve on $arch"
+	# Every program on the base's own PATH has a row (agentry-dockerimages#23):
+	# in the index, in the ambiguous list, or named in base-unowned.txt. One
+	# without would be called unavailable by the CLI although the run can
+	# start it. Names outside the command grammar ([) cannot be declared.
+	# shellcheck disable=SC2016 # expanded in the image's shell
+	"${run[@]}" "$ref" sh -c 'for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do for f in "$d"/*; do [ -x "$f" ] && [ ! -d "$f" ] && echo "${f##*/}"; done; done' |
+		grep -E '^[A-Za-z0-9][A-Za-z0-9._+-]*$' | sort -u >"$tmp/path.txt"
+	awk -F'\t' '!/^#/ && NF { print $1 }' "$tmp/commands.tsv" "$tmp/ambiguous.tsv" "$UNSAFE_CTX/base-unowned.txt" | sort -u >"$tmp/rows.txt"
+	comm -23 "$tmp/path.txt" "$tmp/rows.txt" >"$tmp/norow.txt"
+	if [ -s "$tmp/norow.txt" ]; then
+		echo "FAIL on the base's PATH with no row in the index, the ambiguous list or base-unowned.txt: $(tr '\n' ' ' <"$tmp/norow.txt")"
+		bad=1
+	else
+		echo "ok   all $(wc -l <"$tmp/path.txt") programs on the base's PATH have a row"
+	fi
 	return "$bad"
 }
 
