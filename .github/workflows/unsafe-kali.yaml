@@ -98,7 +98,10 @@ jobs:
   build:
     needs: prepare
     strategy:
-      fail-fast: true
+      # Each architecture checks and pushes on its own; a mirror fault on one
+      # leaves the other's work pushed, and a re-run of the failed job
+      # completes the pair. The merge waits for both.
+      fail-fast: false
       matrix:
         include:
           - platform: linux/amd64

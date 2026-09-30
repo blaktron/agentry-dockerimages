@@ -28,7 +28,13 @@ ARG DEBIAN_FRONTEND=noninteractive
 # (kali-archive-keyring, in the base). make-index.py then holds every file it
 # reads to the SHA-256 that InRelease lists, so the index comes from what Kali
 # signed, whichever mirror http.kali.org redirects to.
-RUN apt-get update \
+# http.kali.org redirects each request to a mirror. While Kali publishes a
+# new index, the InRelease one mirror serves and the Packages another serves
+# can disagree, and apt refuses the mismatch (run 36709803897, whose two
+# attempts both met it on 2026-09-30). A failed update is retried a minute
+# apart, which reaches other mirrors and outlasts a sync; it is never taken
+# as a success.
+RUN for try in 1 2 3 4 5; do apt-get update && break; [ "$try" = 5 ] && exit 1; sleep 60; done \
 	&& apt-get install -y --no-install-recommends ca-certificates curl python3 \
 	&& mkdir -p /work \
 	&& cp /var/lib/apt/lists/*_dists_kali-rolling_InRelease /work/InRelease
@@ -49,7 +55,7 @@ RUN python3 /build/make-index.py --self-test \
 
 FROM ${KALI_IMAGE}
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN for try in 1 2 3 4 5; do apt-get update && break; [ "$try" = 5 ] && exit 1; sleep 60; done \
 	&& apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
