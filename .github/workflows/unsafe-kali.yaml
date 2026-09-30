@@ -1,0 +1,169 @@
+# Build and publish agentry-unsafe-kali, the base of the desktop's Unsafe Mode
+# exec images (agentry-notes plans/unsafe-mode.md §4.1, D9, D10;
+# agentry-dockerimages#15), to ghcr.io/blaktron.
+#
+# Dispatched by hand, from main only: a run with packages: write can push any
+# tag this repository's packages hold, so a branch's workflow file never gets
+# that. The base is re-pinned by hand, monthly and on demand (D10):
+# scripts/pin.sh reports that kalilinux/kali-rolling has moved, the new digest
+# goes into images.tsv in a pull request, and this workflow is dispatched on
+# the result. Each run is tagged with its UTC date and run number and refuses
+# a tag that exists, so a rebuild is a new tag and a new digest; the
+# agentry-unsafe-kali row in images.tsv then takes it.
+#
+# On the first of each month it also runs by itself, only to report whether
+# the base has moved: a red scheduled run is the reminder to re-pin. That run
+# builds and pushes nothing.
+#
+# Each architecture is built natively (D9): amd64 on ubuntu-latest, arm64 on
+# ubuntu-24.04-arm. The command index is made from that architecture's Kali
+# Contents, and the fixture check runs on each image before it is pushed. This
+# repository is public, so both runners are free, and each is a fresh virtual
+# machine per job. Pushing uses the workflow's GITHUB_TOKEN; a package this
+# workflow creates is public.
+name: unsafe-kali
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unsafe-kali
+  cancel-in-progress: false
+
+jobs:
+  repin-due:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fail when the pinned Kali base has moved
+        run: |
+          set -euo pipefail
+          ./scripts/pin.sh | tee pin.out
+          if grep -q '^MOVED   agentry-kali-rolling ' pin.out; then
+            echo "::error::kalilinux/kali-rolling has moved since it was pinned: re-pin agentry-kali-rolling in images.tsv and dispatch this workflow (README, The Unsafe Mode image)"
+            exit 1
+          fi
+
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Refuse any branch but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::dispatch this workflow from main; it pushes public images"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Choose the tag, the UTC date and the run number, and refuse one that exists
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          if docker buildx imagetools inspect "ghcr.io/blaktron/agentry-unsafe-kali:$tag" >/dev/null 2>&1; then
+            echo "::error::ghcr.io/blaktron/agentry-unsafe-kali:$tag exists; a rebuild is a new tag"
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+      - name: Mirror the Kali base by digest
+        run: ./scripts/mirror.sh agentry-kali-rolling
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build this architecture
+        run: ./scripts/build.sh agentry-unsafe-kali
+
+      - name: Check that every fixture command resolves on this architecture
+        run: ./scripts/check.sh --unsafe-image "ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG-${PLATFORM##*/}"
+
+      - name: Push this architecture
+        run: docker push "ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG-${PLATFORM##*/}"
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Join the architectures into one tag
+        run: ./scripts/build.sh --merge agentry-unsafe-kali | tee merge.out
+
+      - name: Check that the joined tag resolves every fixture command
+        run: ./scripts/check.sh --unsafe-image "ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG"
+
+      - name: Write the images.tsv row to the run's summary
+        run: |
+          set -euo pipefail
+          digest=$(sed -n 's/^merged; digest: //p' merge.out)
+          row=$(printf 'agentry-unsafe-kali\tghcr.io/blaktron/agentry-unsafe-kali:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$digest" \
+            "the base of the desktop's Unsafe Mode exec images: Kali (kali-rolling) with a command index and an extras list, amd64 and arm64 (agentry-cli images.unsafe)")
+          {
+            echo "### agentry-unsafe-kali:$IMAGE_TAG"
+            echo
+            echo '```'
+            echo "$row"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "$row"

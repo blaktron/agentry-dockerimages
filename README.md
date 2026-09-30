@@ -15,14 +15,18 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-node-alpine:22-alpine` | `node:22-alpine` | mirror | installs and runs declared npm MCP servers |
 | `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
+| `agentry-unsafe-kali:<YYYY.MM.DD>` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
 `agentry-harness-alpine:3.23` (`alpine:3.23`) and
 `agentry-harness-golang:1.27.0-alpine3.23` (`golang:1.27.0-alpine3.23`).
+One more is needed only to build `agentry-unsafe-kali`:
+`agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
 
-`images.tsv` is the manifest: one tab-separated row per mirrored image, with
-our name, the upstream ref, the upstream digest, the kind and the role.
+`images.tsv` is the manifest: one tab-separated row per image, with our
+name, the upstream ref, the upstream digest, the kind and the role. A `build`
+row names our own published tag and its digest instead.
 
 The Agentry server's own images (Postgres, MinIO, Redis, the edge, authentik,
 OpenSearch, `secureagentryd`) are not here. Neither are the runner image and
@@ -94,6 +98,13 @@ A run never pulls these four. Building `build/docker-agent/` needs a
 
 Both groups were checked with an anonymous manifest fetch on 2026-09-24.
 
+The `unsafe-kali` workflow creates two more packages, and a package a
+workflow creates in this public repository is public:
+
+- `agentry-unsafe-kali`, which the desktop pulls when Unsafe Mode is turned
+  on, so it must need no login;
+- `agentry-kali-rolling`, its build-time base.
+
 ## Repointing the images
 
 The CLI's defaults are tags, not digests. An operator who wants their own
@@ -124,8 +135,8 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows and the build contexts' base refs, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. |
-| `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, with every base taken from our mirrors. `PUSH=1` pushes the result. |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs and the Unsafe Mode image's index generator and extras list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali` and asserts that every fixture command resolves (`CONTAINER` picks the runtime, `PLATFORM` the architecture). |
+| `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
 no credentials: run `docker login ghcr.io` first, and `docker login` for
@@ -138,9 +149,83 @@ The `ci` workflow runs `scripts/check.sh` and its self-test on every pull
 request and every push to `dev` and `main`, on a GitHub-hosted runner. It
 pulls no image and needs no credentials.
 
-The `images` workflow runs the same steps. It is started by hand, and it logs
-in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets
-are set.
+The `images` workflow runs the same steps, then mirrors every `mirror` row
+and builds every context in `build/` except those built per architecture,
+which have their own workflow (`unsafe-kali`). It is started by hand, and it
+logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+secrets are set.
+
+## The Unsafe Mode image
+
+`agentry-unsafe-kali` is the base the desktop's Unsafe Mode builds a
+QuickAgent's exec image on, when that QuickAgent declares commands the
+machine's exec catalogue does not carry (agentry-notes `plans/unsafe-mode.md`;
+agentry-dockerimages#15). The desktop pulls it when a person turns Unsafe
+Mode on; the CLI (Unsafe Mode M2) reads its two data files and installs each
+declared command on top of it, one package at a time.
+
+It is a lean Kali Linux (`kali-rolling`): `ca-certificates`, `python3` and
+`python3-venv`, and no security tool. Under `/etc/agentry/unsafe/`:
+
+- **`commands.tsv`, the command index.** Each command a Kali package puts in
+  `usr/bin`, `usr/sbin`, `bin` or `sbin` (main, contrib and non-free), mapped
+  to its package. It is generated at build time by
+  `build/agentry-unsafe-kali/make-index.py` from Kali's `Contents-<arch>` and
+  `Packages` for the image's own architecture. Each file is first held to the
+  SHA-256 in Kali's `InRelease`, whose signature `apt-get update` has checked.
+  A command several packages ship takes the package named like the command,
+  then the one package of priority standard or higher.
+- **`ambiguous.tsv`.** The commands that rule leaves undecided. They are left
+  out of the index, never guessed.
+- **`extras.tsv`, the extras list.** It is maintained by hand for commands no
+  package puts on `PATH`, and is a closed set of two recipes: `pip <command>
+  <name>==<version>` and `link <command> <package> <path>`. The build refuses
+  any other shape, and a link path its package does not ship.
+
+`build/agentry-unsafe-kali/fixture-commands.txt` holds the declared commands
+of `blaktron/binary-reverse-engineer@0.1.0`, the QuickAgent that prompted
+Unsafe Mode. `scripts/check.sh --unsafe-image` asserts that each resolves
+through the extras list or the index. On 2026-09-30 all 16 resolved on both
+architectures:
+
+- 13 through the index;
+- `analyzeHeadless` through a link from `ghidra`;
+- `decompyle3` and `uncompyle6` through pip.
+
+The index held 47,098 commands on amd64 and 46,071 on arm64.
+
+**Publishing.** The `unsafe-kali` workflow (manual dispatch) mirrors the base,
+builds each architecture natively (amd64 on `ubuntu-latest`, arm64 on
+`ubuntu-24.04-arm`), runs the fixture check on each before pushing it, joins
+them into one tag named for the UTC build date and the run number
+(`2026.09.30.1`), and checks the joined image. It runs only from `main`, and
+refuses a tag that already exists. The `agentry-unsafe-kali` row in
+`images.tsv` then takes that tag and its digest. The package is public, so
+the desktop pulls it without a login. On the first of each month the
+workflow also runs by itself, only to report whether the Kali base has moved
+since it was pinned: a red run is the reminder to re-pin.
+
+**The monthly re-pin (D10).** Kali has no release tags and no snapshot
+service, so the base is re-pinned monthly, and on demand:
+
+1. `scripts/pin.sh` reports that `kalilinux/kali-rolling` has moved.
+2. A pull request puts the new digest in the `agentry-kali-rolling` row.
+3. The `unsafe-kali` workflow is dispatched.
+4. A second pull request records the new image's digest in the
+   `agentry-unsafe-kali` row.
+5. The CLI's default follows with its own pin change.
+
+Package versions are not frozen. Each build records what it installed, and
+the CLI records what each exec image installed in the run's receipt.
+
+**arm64 by hand.** The workstation has no arm64 emulation. arm64 is tested on
+the Mac build host (`maxbookpro`, Apple silicon) with Apple's `container` CLI
+(1.5.0, installed 2026-09-30):
+
+```
+container build --build-arg KALI_IMAGE=<the base by digest> -t local/agentry-unsafe-kali:arm64 build/agentry-unsafe-kali
+CONTAINER=container PLATFORM=linux/arm64 scripts/check.sh --unsafe-image local/agentry-unsafe-kali:arm64
+```
 
 ## Building Docker Agent from source
 

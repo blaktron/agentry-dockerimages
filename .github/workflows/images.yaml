@@ -59,6 +59,12 @@ jobs:
           set -euo pipefail
           for ctx in build/*/; do
             name=$(basename "$ctx")
+            # A context built per architecture has its own workflow, whose
+            # jobs build each natively and join them (unsafe-kali.yaml).
+            if grep -q '^PLATFORMS=' "$ctx/source.env"; then
+              echo "skip $name: built per architecture by its own workflow"
+              continue
+            fi
             echo "::group::$name"
             PUSH=1 ./scripts/build.sh "$name" || {
               echo "::error::build/$name failed or is blocked on an unmirrored base"

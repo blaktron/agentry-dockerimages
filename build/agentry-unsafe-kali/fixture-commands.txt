@@ -1,0 +1,21 @@
+# The declared exec commands of blaktron/binary-reverse-engineer@0.1.0 on the
+# production registry, the QuickAgent that prompted Unsafe Mode (plan
+# unsafe-mode.md §1). scripts/check.sh --unsafe-image asserts each resolves
+# through extras.tsv or the index, on every architecture the image is built
+# for.
+file
+strings
+xxd
+objdump
+readelf
+nm
+r2
+rabin2
+analyzeHeadless
+binwalk
+pyinstxtractor
+decompyle3
+uncompyle6
+7z
+unzip
+python3

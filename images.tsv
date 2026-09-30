@@ -3,8 +3,12 @@
 # Tab-separated so the scripts that read it need no parser.
 #
 # kind: `mirror` rows are copied unchanged by scripts/mirror.sh. `build` marks
-# an image we publish from our own build of pinned upstream source; the build
-# itself is scripts/build.sh <name>, from build/<name>/.
+# an image we publish from our own build, of pinned upstream source or of the
+# build context itself; the build is scripts/build.sh <name>, from
+# build/<name>/. A `build` row's ref is our own published tag
+# (ghcr.io/blaktron/<name>:<tag>) and its digest is that tag's manifest, so
+# scripts/pin.sh reports a tag that was pushed again; scripts/mirror.sh skips
+# it.
 #
 # Every upstream ref is pinned by digest. scripts/pin.sh reports tags that have
 # moved and never edits this file.
@@ -22,3 +26,4 @@ agentry-python-alpine	python:3.12-alpine	sha256:4c47124a8391cb7a9f571164147d1547
 agentry-mcp-gateway-v2	docker/mcp-gateway:v2	sha256:54dd518ee51b5c4641b02ddd4790b88cc0dafa59d76b6d07bc441d896a23bbea	mirror	build-time only: upstream's docker-agent Dockerfile copies the /docker-mcp CLI plugin out of this floating v2 tag; we copy it out of a digest instead
 agentry-harness-alpine	alpine:3.23	sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0	mirror	build-time only: the runtime base of build/docker-agent/ — upstream builds the harness on alpine 3.23, while the runner image runs on 3.22
 agentry-harness-golang	golang:1.27.0-alpine3.23	sha256:3747dcba41c8b0db3211fda4db61638b980e17ac5bb3c94460a975a9cfe19395	mirror	build-time only: compiles build/docker-agent/; upstream pins Go 1.27.0 against alpine 3.23, whose musl the harness is statically linked against
+agentry-kali-rolling	kalilinux/kali-rolling:latest	sha256:d1d7e581ed60b0bbf9cb8a4bc853526355978f3b943d3a1d7dc7ce209e4231b6	mirror	build-time only: the base of build/agentry-unsafe-kali/, the Unsafe Mode image (kali-rolling has no release tags; the digest is the pin, re-pinned monthly)
