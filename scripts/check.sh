@@ -12,8 +12,9 @@
 #     fork: this repository is public, and a self-hosted runner persists
 #     between jobs, so such a job must carry the fork guard below;
 #   - a build context's bases.env names a ref that has no row in images.tsv;
-#   - the Unsafe Mode image's index generator fails its self-test, or its
-#     extras list is not the closed recipe set (build/agentry-unsafe-kali).
+#   - the Unsafe Mode image's index generator fails its self-test, its
+#     extras list is not the closed recipe set, or base-unowned.txt is not
+#     one command and one reason a row (build/agentry-unsafe-kali).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image mode,
 # which runs the image it names.
@@ -25,8 +26,10 @@
 #       read the command index and the extras list out of a built
 #       agentry-unsafe-kali and assert that every command in
 #       build/agentry-unsafe-kali/fixture-commands.txt resolves through one of
-#       them (plan unsafe-mode.md §4.1), and list the commands the index left
-#       out as ambiguous. This one pulls and runs the image: CONTAINER names
+#       them (plan unsafe-mode.md §4.1), list the commands the index left
+#       out as ambiguous, and fail when a program on the image's own PATH has
+#       no row in the index, the ambiguous list or base-unowned.txt
+#       (agentry-dockerimages#23). This one pulls and runs the image: CONTAINER names
 #       the runtime (default docker; Apple's `container` on the Mac build
 #       host), and PLATFORM (e.g. linux/arm64) asks for, and checks, one
 #       architecture. It runs under macOS's bash 3.2.
@@ -135,11 +138,13 @@ checkUnsafe() {
 	local bad=0
 	python3 "$UNSAFE_CTX/make-index.py" --self-test || bad=1
 	python3 "$UNSAFE_CTX/make-index.py" --check-extras "$UNSAFE_CTX/extras.tsv" || bad=1
+	python3 "$UNSAFE_CTX/make-index.py" --check-unowned "$UNSAFE_CTX/base-unowned.txt" || bad=1
 	return "$bad"
 }
 
-# unsafeImage reads the two files out of the image and resolves each fixture
-# command the way the CLI will: the extras list first, then the index.
+# unsafeImage reads the three files out of the image, resolves each fixture
+# command the way the CLI will (the extras list first, then the index), and
+# holds every program on the image's own PATH to having a row.
 unsafeImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" arch want tmp cmd how bad=0 n=0
 	local run=("$runtime" run --rm)
@@ -178,17 +183,22 @@ unsafeImage() {
 	# Every program on the base's own PATH has a row (agentry-dockerimages#23):
 	# in the index, in the ambiguous list, or named in base-unowned.txt. One
 	# without would be called unavailable by the CLI although the run can
-	# start it. Names outside the command grammar ([) cannot be declared.
+	# start it. The directories are the image's ENV PATH, as make-index.py's
+	# BASE_PATH; the grep is its COMMAND grammar, since a name outside it ([)
+	# cannot be declared.
 	# shellcheck disable=SC2016 # expanded in the image's shell
-	"${run[@]}" "$ref" sh -c 'for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do for f in "$d"/*; do [ -x "$f" ] && [ ! -d "$f" ] && echo "${f##*/}"; done; done' |
-		grep -E '^[A-Za-z0-9][A-Za-z0-9._+-]*$' | sort -u >"$tmp/path.txt"
+	"${run[@]}" "$ref" sh -c 'for d in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do for f in "$d"/*; do if [ -x "$f" ] && [ ! -d "$f" ]; then echo "${f##*/}"; fi; done; done' |
+		{ grep -E '^[A-Za-z0-9][A-Za-z0-9._+-]*$' || true; } | sort -u >"$tmp/path.txt"
 	awk -F'\t' '!/^#/ && NF { print $1 }' "$tmp/commands.tsv" "$tmp/ambiguous.tsv" "$UNSAFE_CTX/base-unowned.txt" | sort -u >"$tmp/rows.txt"
 	comm -23 "$tmp/path.txt" "$tmp/rows.txt" >"$tmp/norow.txt"
-	if [ -s "$tmp/norow.txt" ]; then
+	if [ ! -s "$tmp/path.txt" ]; then
+		echo "FAIL $ref: no program found on the base's PATH"
+		bad=1
+	elif [ -s "$tmp/norow.txt" ]; then
 		echo "FAIL on the base's PATH with no row in the index, the ambiguous list or base-unowned.txt: $(tr '\n' ' ' <"$tmp/norow.txt")"
 		bad=1
 	else
-		echo "ok   all $(wc -l <"$tmp/path.txt") programs on the base's PATH have a row"
+		echo "ok   all $(grep -c . "$tmp/path.txt") programs on the base's PATH have a row"
 	fi
 	return "$bad"
 }
@@ -218,6 +228,7 @@ workflow checkWorkflows
 fork checkWorkflows
 bases checkBases
 extras checkUnsafe
+unowned checkUnsafe
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -233,6 +244,7 @@ breakCase() {
 	fork) sed -i 's/runs-on: ubuntu-latest/runs-on: [self-hosted, linux, x64]/' .github/workflows/ci.yaml ;;
 	bases) printf 'EXTRA_IMAGE=example/unmirrored:1\n' >>build/docker-agent/bases.env ;;
 	extras) printf 'pip\tx\tx>=1\n' >>build/agentry-unsafe-kali/extras.tsv ;;
+	unowned) printf 'policy-rc.d\ttwice\n' >>build/agentry-unsafe-kali/base-unowned.txt ;;
 	esac
 }
 
