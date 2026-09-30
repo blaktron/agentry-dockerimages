@@ -24,8 +24,9 @@ Three more mirrors are needed only to build `agentry-docker-agent-src`:
 One more is needed only to build `agentry-unsafe-kali`:
 `agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
 
-`images.tsv` is the manifest: one tab-separated row per mirrored image, with
-our name, the upstream ref, the upstream digest, the kind and the role.
+`images.tsv` is the manifest: one tab-separated row per image, with our
+name, the upstream ref, the upstream digest, the kind and the role. A `build`
+row names our own published tag and its digest instead.
 
 The Agentry server's own images (Postgres, MinIO, Redis, the edge, authentik,
 OpenSearch, `secureagentryd`) are not here. Neither are the runner image and
@@ -148,9 +149,11 @@ The `ci` workflow runs `scripts/check.sh` and its self-test on every pull
 request and every push to `dev` and `main`, on a GitHub-hosted runner. It
 pulls no image and needs no credentials.
 
-The `images` workflow runs the same steps. It is started by hand, and it logs
-in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets
-are set.
+The `images` workflow runs the same steps, then mirrors every `mirror` row
+and builds every context in `build/` except those built per architecture,
+which have their own workflow (`unsafe-kali`). It is started by hand, and it
+logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+secrets are set.
 
 ## The Unsafe Mode image
 
@@ -193,10 +196,14 @@ The index held 47,098 commands on amd64 and 46,071 on arm64.
 
 **Publishing.** The `unsafe-kali` workflow (manual dispatch) mirrors the base,
 builds each architecture natively (amd64 on `ubuntu-latest`, arm64 on
-`ubuntu-24.04-arm`), runs the fixture check on each, joins them into one tag
-named for the UTC build date, and checks the joined image. The row in
-`images.tsv` then takes that tag's digest. The package is public, so the
-desktop pulls it without a login.
+`ubuntu-24.04-arm`), runs the fixture check on each before pushing it, joins
+them into one tag named for the UTC build date and the run number
+(`2026.09.30.1`), and checks the joined image. It runs only from `main`, and
+refuses a tag that already exists. The `agentry-unsafe-kali` row in
+`images.tsv` then takes that tag and its digest. The package is public, so
+the desktop pulls it without a login. On the first of each month the
+workflow also runs by itself, only to report whether the Kali base has moved
+since it was pinned: a red run is the reminder to re-pin.
 
 **The monthly re-pin (D10).** Kali has no release tags and no snapshot
 service, so the base is re-pinned monthly, and on demand:

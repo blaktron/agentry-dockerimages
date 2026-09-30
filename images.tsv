@@ -3,8 +3,12 @@
 # Tab-separated so the scripts that read it need no parser.
 #
 # kind: `mirror` rows are copied unchanged by scripts/mirror.sh. `build` marks
-# an image we publish from our own build of pinned upstream source; the build
-# itself is scripts/build.sh <name>, from build/<name>/.
+# an image we publish from our own build, of pinned upstream source or of the
+# build context itself; the build is scripts/build.sh <name>, from
+# build/<name>/. A `build` row's ref is our own published tag
+# (ghcr.io/blaktron/<name>:<tag>) and its digest is that tag's manifest, so
+# scripts/pin.sh reports a tag that was pushed again; scripts/mirror.sh skips
+# it.
 #
 # Every upstream ref is pinned by digest. scripts/pin.sh reports tags that have
 # moved and never edits this file.

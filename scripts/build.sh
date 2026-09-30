@@ -57,6 +57,10 @@ UPSTREAM_REPO="" UPSTREAM_COMMIT="" UPSTREAM_TAG="" PLATFORMS=""
 # shellcheck source=/dev/null
 . "$ctx/source.env"
 IMAGE_TAG="${tagFromEnv:-${IMAGE_TAG:-}}"
+if [ -z "${IMAGE_NAME:-}" ]; then
+	echo "$ctx/source.env names no IMAGE_NAME" >&2
+	exit 2
+fi
 if [ -z "$IMAGE_TAG" ]; then
 	echo "no IMAGE_TAG: $ctx/source.env sets none, so pass one" >&2
 	exit 2
@@ -98,10 +102,10 @@ fi
 # ourRef <upstream ref> prints the ref in our registry, with its pinned
 # digest, from images.tsv.
 ourRef() {
-	local name digest
-	read -r name digest < <(awk -F'\t' -v u="$1" '!/^[[:space:]]*#/ && $2 == u { print $1, $3; exit }' "$MANIFEST")
-	[ -n "${name:-}" ] || return 1
-	echo "$REGISTRY/$name:${1##*:}@$digest"
+	local mirrored digest
+	read -r mirrored digest < <(awk -F'\t' -v u="$1" '!/^[[:space:]]*#/ && $2 == u { print $1, $3; exit }' "$MANIFEST")
+	[ -n "${mirrored:-}" ] || return 1
+	echo "$REGISTRY/$mirrored:${1##*:}@$digest"
 }
 
 missing=""
@@ -146,7 +150,7 @@ else
 	cp -r "$ctx" "$work/src"
 fi
 
-echo "build $dst${PLATFORM:+ ($PLATFORM)}"
+echo "build $dst${platformArgs[1]:+ (${platformArgs[1]})}"
 docker build \
 	--file "$work/src/Dockerfile" \
 	"${platformArgs[@]}" \

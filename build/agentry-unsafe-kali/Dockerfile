@@ -4,9 +4,9 @@
 # (agentry-notes plans/unsafe-mode.md §4.1; agentry-dockerimages#15).
 #
 # A lean Kali Linux (kali-rolling) with ca-certificates, python3 and Python's
-# venv support, and two data files under /etc/agentry/unsafe/ that the CLI
-# reads when it builds a QuickAgent's exec image on top of this one (Unsafe
-# Mode M2):
+# venv support, and three data files under /etc/agentry/unsafe/, two of which
+# the CLI reads when it builds a QuickAgent's exec image on top of this one
+# (Unsafe Mode M2):
 #
 #   commands.tsv   the command index: command → the Kali package that ships it,
 #                  generated here from Kali's Contents-<arch> by make-index.py

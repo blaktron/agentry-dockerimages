@@ -12,8 +12,10 @@ contrib and non-free. A command several packages ship takes, in order:
 
 What is left ambiguous after that is left out of the index and written to
 ambiguous.tsv, never guessed. The CLI (agentry-cli, Unsafe Mode M2) reads the
-index by a declared command's bare name, so a name this file cannot hold (one
-that is not a plain command name) is left out as well.
+index by a declared command's bare name and installs the package it names, so
+both columns are held to a grammar (plan invariant 3): a command that is not a
+plain command name, and a package that is not a Debian package name, are left
+out and counted, whatever the Contents say.
 
 Every file read is first held to the SHA-256 that Kali's InRelease lists for
 it. apt-get update has already verified InRelease's signature against Kali's
@@ -67,7 +69,10 @@ def release_hashes(release_text):
         if inside:
             if not line.startswith(" "):
                 break
-            digest, size, path = line.split()
+            fields = line.split()
+            if len(fields) != 3 or not fields[1].isdigit():
+                raise Refused(f"InRelease: an SHA256 line that is not <hash> <size> <path>: {line.strip()!r}")
+            digest, size, path = fields
             out[path] = (digest, int(size))
     return out
 
@@ -75,11 +80,13 @@ def release_hashes(release_text):
 def verified(path, rel, hashes):
     """The lines of gzipped path, refused unless its bytes are what InRelease lists for rel.
 
-    The lines are read as a stream: main's Contents is about 8 million of them,
-    and a builder VM (Apple's container builder on the Mac) has little memory."""
+    The compressed file is read whole, to hash it; its lines are then
+    decompressed as a stream: main's Contents is about 8 million of them, and a
+    builder VM (Apple's container builder on the Mac) has little memory."""
     if rel not in hashes:
         raise Refused(f"{rel} is not listed in InRelease")
-    data = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        data = fh.read()
     want, size = hashes[rel]
     got = hashlib.sha256(data).hexdigest()
     if got != want or len(data) != size:
@@ -88,9 +95,10 @@ def verified(path, rel, hashes):
 
 
 def parse_contents(lines, keep_files_of=()):
-    """{command: set of packages} for the bin directories, and {package: set of paths}
-    for the packages in keep_files_of (the ones the extras list links from)."""
-    commands, files = {}, {}
+    """{command: set of packages} for the bin directories, {package: set of paths}
+    for the packages in keep_files_of (the ones the extras list links from), and
+    how many package names were refused for not being package names."""
+    commands, files, refused = {}, {}, 0
     keep = set(keep_files_of)
     for line in lines:
         # "path<whitespace>section/pkg[,section/pkg...]"; the path may hold spaces.
@@ -98,13 +106,19 @@ def parse_contents(lines, keep_files_of=()):
         if len(parts) != 2:
             continue
         path, where = parts
-        pkgs = {loc.rsplit("/", 1)[-1] for loc in where.split(",") if loc}
+        pkgs = set()
+        for loc in where.split(","):
+            pkg = loc.rsplit("/", 1)[-1]
+            if PACKAGE.match(pkg):
+                pkgs.add(pkg)
+            elif loc:
+                refused += 1
         for p in pkgs & keep:
             files.setdefault(p, set()).add(path)
         m = BIN_PATH.match(path)
-        if m and COMMAND.match(m.group(1)):
+        if m and pkgs and COMMAND.match(m.group(1)):
             commands.setdefault(m.group(1), set()).update(pkgs)
-    return commands, files
+    return commands, files, refused
 
 
 def parse_priorities(lines):
@@ -139,10 +153,11 @@ def resolve(commands, priorities):
 
 def link_packages(text):
     """The packages the extras list's link rows name."""
-    return {f[2] for f in (l.split("\t") for l in text.splitlines()) if len(f) == 4 and f[0] == "link"}
+    rows = (line.split("\t") for line in text.splitlines())
+    return {row[2] for row in rows if len(row) == 4 and row[0] == "link"}
 
 
-def check_extras(text, files=None):
+def check_extras(text, files=None, name="extras.tsv"):
     """Refuse an extras list that is not the closed recipe set, or a link Kali does not ship.
 
     files is {package: paths} from Contents; None checks the grammar alone, as
@@ -152,14 +167,14 @@ def check_extras(text, files=None):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        f = raw.split("\t")
-        where = f"extras.tsv:{n}"
-        if f[0] == "pip" and len(f) == 3:
-            _, cmd, spec = f
+        row = raw.split("\t")
+        where = f"{name}:{n}"
+        if row[0] == "pip" and len(row) == 3:
+            _, cmd, spec = row
             if not PIP_SPEC.match(spec):
                 raise Refused(f"{where}: pip wants <pypi-name>==<exact version>, got {spec!r}")
-        elif f[0] == "link" and len(f) == 4:
-            _, cmd, pkg, path = f
+        elif row[0] == "link" and len(row) == 4:
+            _, cmd, pkg, path = row
             if not PACKAGE.match(pkg) or not PKG_PATH.match(path) or ".." in path.split("/"):
                 raise Refused(f"{where}: link wants a package name and a relative path, got {pkg!r} {path!r}")
             if files is not None and path not in files.get(pkg, ()):
@@ -173,15 +188,21 @@ def check_extras(text, files=None):
         seen.add(cmd)
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
 def build(arch, workdir, extras, outdir):
-    release = open(os.path.join(workdir, "InRelease"), encoding="utf-8").read()
+    release = read_text(os.path.join(workdir, "InRelease"))
     hashes = release_hashes(release)
-    extras_text = open(extras, encoding="utf-8").read()
+    extras_text = read_text(extras)
     linked = link_packages(extras_text)
-    commands, files, priorities = {}, {}, {}
+    commands, files, priorities, refused = {}, {}, {}, 0
     for comp in COMPONENTS:
         rel = f"{comp}/Contents-{arch}.gz"
-        cmds, fls = parse_contents(verified(os.path.join(workdir, rel), rel, hashes), linked)
+        cmds, fls, bad = parse_contents(verified(os.path.join(workdir, rel), rel, hashes), linked)
+        refused += bad
         for k, v in cmds.items():
             commands.setdefault(k, set()).update(v)
         for k, v in fls.items():
@@ -190,7 +211,7 @@ def build(arch, workdir, extras, outdir):
         priorities.update(parse_priorities(verified(os.path.join(workdir, rel), rel, hashes)))
     check_extras(extras_text, files)
     index, ambiguous = resolve(commands, priorities)
-    date = next((l[6:] for l in release.splitlines() if l.startswith("Date: ")), "unknown")
+    date = next((line[len("Date: "):] for line in release.splitlines() if line.startswith("Date: ")), "unknown")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "commands.tsv"), "w", encoding="utf-8") as fh:
         fh.write(f"# command\tpackage: Kali kali-rolling {arch}, main contrib non-free, InRelease of {date}\n")
@@ -200,7 +221,7 @@ def build(arch, workdir, extras, outdir):
         fh.write("# command\tpackages: shipped by several, none named for it, not one of standard priority; left out of the index\n")
         for cmd in sorted(ambiguous):
             fh.write(f"{cmd}\t{','.join(ambiguous[cmd])}\n")
-    print(f"index: {len(index)} commands, {len(ambiguous)} ambiguous and left out ({arch}, InRelease of {date})")
+    print(f"index: {len(index)} commands, {len(ambiguous)} ambiguous and left out, {refused} package names refused ({arch}, InRelease of {date})")
 
 
 def self_test():
@@ -214,10 +235,12 @@ def self_test():
         "usr/bin/tie\tutils/aaa,utils/bbb",           # two, neither standard: ambiguous
         "usr/bin/both\tutils/ccc,utils/ddd",          # two, both standard: ambiguous
         "sbin/ip\tnet/iproute2",
-        "usr/bin/sub/dir\tutils/x",                   # not a direct child: no command
+        "usr/bin/sub/dir\tutils/subdirs",                   # not a direct child: no command
         "usr/bin/$(x)\tutils/evil",                   # not a command name
         "usr/share/ghidra/support/analyzeHeadless\tmisc/ghidra",
         "usr/share/doc/a file with spaces\tdoc/spaced",
+        "usr/bin/foo\tutils/$(curl${IFS}x|sh);`id`",  # a package that is no package name
+        "usr/bin/bar\tutils/Bad_Name,utils/good-one",  # one refused, one kept
     ])
     packages = "\n".join([
         "Package: 7zip", "Priority: standard", "",
@@ -227,11 +250,15 @@ def self_test():
         "Package: ccc", "Priority: standard", "",
         "Package: ddd", "Priority: important", "",
     ])
-    commands, files = parse_contents(contents.splitlines(), {"ghidra", "spaced"})
+    commands, files, refused = parse_contents(contents.splitlines(), {"ghidra", "spaced"})
     index, ambiguous = resolve(commands, parse_priorities(packages.splitlines()))
-    want_index = {"file": "file", "strings": "binutils", "7z": "7zip", "nc": "nc", "ip": "iproute2"}
+    want_index = {"file": "file", "strings": "binutils", "7z": "7zip", "nc": "nc", "ip": "iproute2", "bar": "good-one"}
+    if refused != 2 or "foo" in commands:
+        failures_early = [f"a package that is no package name was kept ({refused} refused, foo={commands.get('foo')})"]
+    else:
+        failures_early = []
     want_ambiguous = {"tie": ["aaa", "bbb"], "both": ["ccc", "ddd"]}
-    failures = []
+    failures = list(failures_early)
     if index != want_index:
         failures.append(f"index {index} != {want_index}")
     if ambiguous != want_ambiguous:
@@ -265,10 +292,12 @@ def self_test():
         blob = gzip.compress(b"usr/bin/file utils/file\n")
         hashes = {"main/Contents-amd64.gz": (hashlib.sha256(blob).hexdigest(), len(blob))}
         path = os.path.join(d, "c.gz")
-        open(path, "wb").write(blob)
+        with open(path, "wb") as fh:
+            fh.write(blob)
         if list(verified(path, "main/Contents-amd64.gz", hashes)) != ["usr/bin/file utils/file\n"]:
             failures.append("a verified file was not read back")
-        open(path, "wb").write(blob + b"x")
+        with open(path, "wb") as fh:
+            fh.write(blob + b"x")
         try:
             verified(path, "main/Contents-amd64.gz", hashes)
             failures.append("a file that is not what InRelease lists was accepted")
@@ -283,6 +312,11 @@ def self_test():
         failures.append("the file list of a package the extras do not link from was kept")
     if link_packages("link\tx\tghidra\tusr/x\npip\ty\ty==1\n") != {"ghidra"}:
         failures.append("link_packages did not name the linked package alone")
+    try:
+        release_hashes("SHA256:\n abc main/Contents-amd64.gz\n")
+        failures.append("an InRelease line without its size was accepted")
+    except Refused:
+        pass
     listed = release_hashes("Origin: Kali\nSHA256:\n abc 12 main/Contents-amd64.gz\nSHA512:\n def 12 main/Contents-amd64.gz\n")
     if listed != {"main/Contents-amd64.gz": ("abc", 12)}:
         failures.append(f"release_hashes read {listed}")
@@ -302,21 +336,21 @@ def main():
     ap.add_argument("--dir")
     ap.add_argument("--extras")
     ap.add_argument("--out")
-    a = ap.parse_args()
-    if a.self_test:
+    args = ap.parse_args()
+    if args.self_test:
         return self_test()
-    if a.check_extras:
+    if args.check_extras:
         try:
-            check_extras(open(a.check_extras, encoding="utf-8").read())
+            check_extras(read_text(args.check_extras), name=args.check_extras)
         except Refused as e:
             print(f"REFUSED: {e}", file=sys.stderr)
             return 1
-        print(f"ok   {a.check_extras}: the closed recipe set")
+        print(f"ok   {args.check_extras}: the closed recipe set")
         return 0
-    if not (a.arch and a.dir and a.extras and a.out):
+    if not (args.arch and args.dir and args.extras and args.out):
         ap.error("--arch, --dir, --extras and --out are required")
     try:
-        build(a.arch, a.dir, a.extras, a.out)
+        build(args.arch, args.dir, args.extras, args.out)
     except Refused as e:
         print(f"REFUSED: {e}", file=sys.stderr)
         return 1

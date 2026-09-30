@@ -15,7 +15,8 @@
 #   - the Unsafe Mode image's index generator fails its self-test, or its
 #     extras list is not the closed recipe set (build/agentry-unsafe-kali).
 #
-# It pulls nothing and reads no credential.
+# It pulls nothing and reads no credential, except in --unsafe-image mode,
+# which runs the image it names.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -24,12 +25,14 @@
 #       read the command index and the extras list out of a built
 #       agentry-unsafe-kali and assert that every command in
 #       build/agentry-unsafe-kali/fixture-commands.txt resolves through one of
-#       them (plan unsafe-mode.md §4.1). This one runs the image: CONTAINER
-#       names the runtime (default docker; Apple's `container` on the Mac
-#       build host), and PLATFORM (e.g. linux/arm64) asks for, and checks,
-#       one architecture.
+#       them (plan unsafe-mode.md §4.1), and list the commands the index left
+#       out as ambiguous. This one pulls and runs the image: CONTAINER names
+#       the runtime (default docker; Apple's `container` on the Mac build
+#       host), and PLATFORM (e.g. linux/arm64) asks for, and checks, one
+#       architecture. It runs under macOS's bash 3.2.
 #
-# Needs bash, awk, shellcheck, and python3 with PyYAML.
+# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image needs
+# a container runtime instead.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -142,6 +145,8 @@ unsafeImage() {
 	local run=("$runtime" run --rm)
 	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
 	tmp=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: tmp is local
+	trap "rm -rf '$tmp'" EXIT
 	"${run[@]}" "$ref" cat /etc/agentry/unsafe/commands.tsv >"$tmp/commands.tsv"
 	"${run[@]}" "$ref" cat /etc/agentry/unsafe/extras.tsv >"$tmp/extras.tsv"
 	"${run[@]}" "$ref" cat /etc/agentry/unsafe/ambiguous.tsv >"$tmp/ambiguous.tsv"
@@ -153,7 +158,10 @@ unsafeImage() {
 			bad=1
 		fi
 	fi
-	echo "$ref ($arch): $(grep -vc '^#' "$tmp/commands.tsv") commands indexed, $(grep -vc '^#' "$tmp/ambiguous.tsv") ambiguous and left out"
+	echo "$ref ($arch): $(grep -vc '^#' "$tmp/commands.tsv") commands indexed, $(grep -vc '^#' "$tmp/ambiguous.tsv") ambiguous and left out:"
+	# The ambiguities, as command(packages), wrapped: the plan has check.sh
+	# report what the index leaves out rather than guess.
+	awk -F'\t' '!/^#/ { printf "%s(%s) ", $1, $2 } END { print "" }' "$tmp/ambiguous.tsv" | fold -s -w 100 | sed 's/^/     /'
 	while read -r cmd; do
 		case "$cmd" in '' | \#*) continue ;; esac
 		n=$((n + 1))
@@ -166,7 +174,6 @@ unsafeImage() {
 			bad=1
 		fi
 	done <"$UNSAFE_CTX/fixture-commands.txt"
-	rm -rf "$tmp"
 	[ "$bad" -eq 0 ] && echo "ok   all $n fixture commands resolve on $arch"
 	return "$bad"
 }
