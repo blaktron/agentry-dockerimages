@@ -15,7 +15,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-node-alpine:22-alpine` | `node:22-alpine` | mirror | installs and runs declared npm MCP servers |
 | `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
-| `agentry-unsafe-kali:<YYYY.MM.DD>` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
+| `agentry-unsafe-kali:2026.09.30.2` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -201,7 +201,11 @@ them into one tag named for the UTC build date and the run number
 (`2026.09.30.1`), and checks the joined image. It runs only from `main`, and
 refuses a tag that already exists. The `agentry-unsafe-kali` row in
 `images.tsv` then takes that tag and its digest. The package is public, so
-the desktop pulls it without a login. On the first of each month the
+the desktop pulls it without a login. The first published build is
+`ghcr.io/blaktron/agentry-unsafe-kali:2026.09.30.2@sha256:87fa4ae406a9621cef3a4cffcdccf2a512da03141ca21727ce663ca715a191da`
+(run 36710671499). Its base is `kali-rolling` at the pinned digest, with
+Kali's index of 2026-09-30 06:58 UTC. An anonymous manifest fetch answered
+200 the same day. On the first of each month the
 workflow also runs by itself, only to report whether the Kali base has moved
 since it was pinned: a red run is the reminder to re-pin.
 
