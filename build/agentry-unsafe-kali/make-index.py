@@ -26,11 +26,25 @@ the Contents are at hand: each row is one of the two closed recipe kinds,
 each value is held to a grammar, and a link's path must be a file its package
 ships on this architecture.
 
+The base's own programs (agentry-dockerimages#23). Contents does not list
+alternatives links, so a program the built base already carries through one
+(awk, which, pager...) would have no row, and the CLI would call it
+unavailable while the run could start it; so would a program the base carries
+that several packages ship (python3.14, in ambiguous.tsv). --base-scan runs in
+the final stage, after its installs: it walks the image's PATH, resolves each
+entry inside the image, and gives a program with no index row one naming the
+package that owns the file it resolves to (dpkg's own file lists), taking it
+out of ambiguous.tsv where it was there. A program on the PATH that no package
+owns fails the build, unless base-unowned.txt names it with a reason; that
+file only holds a row back, and does not ship in the image.
+
 Usage:
   make-index.py --arch amd64 --dir /work --extras extras.tsv --out /out
       /work holds InRelease and <comp>/Contents-<arch>.gz and
       <comp>/binary-<arch>/Packages.gz for main, contrib and non-free.
+  make-index.py --base-scan / --data /etc/agentry/unsafe --unowned base-unowned.txt
   make-index.py --check-extras extras.tsv    the grammar alone, no Contents
+  make-index.py --check-unowned base-unowned.txt
   make-index.py --self-test
 """
 
@@ -53,6 +67,11 @@ COMMAND = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 PACKAGE = re.compile(r"^[a-z0-9][a-z0-9.+-]+$")
 PIP_SPEC = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9][A-Za-z0-9.+!_-]*$")
 PKG_PATH = re.compile(r"^(?:[A-Za-z0-9._+-]+/)*[A-Za-z0-9._+-]+$")
+
+
+# The PATH the base scan walks: the image's own ENV PATH, in order. The same
+# six directories are walked by scripts/check.sh --unsafe-image.
+BASE_PATH = ("usr/local/sbin", "usr/local/bin", "usr/sbin", "usr/bin", "sbin", "bin")
 
 
 class Refused(Exception):
@@ -224,6 +243,245 @@ def build(arch, workdir, extras, outdir):
     print(f"index: {len(index)} commands, {len(ambiguous)} ambiguous and left out, {refused} package names refused ({arch}, InRelease of {date})")
 
 
+def inside(root, path):
+    """The host path of an absolute path inside the image root."""
+    return os.path.join(root, (path or "").lstrip("/"))
+
+
+def resolve_in(root, path, hops=40):
+    """path (absolute inside the image) with every symlink followed inside root,
+    as an absolute path inside the image; None when it dangles or loops."""
+    parts = [p for p in path.split("/") if p]
+    done = []
+    while parts:
+        part = parts.pop(0)
+        if part == ".":
+            continue
+        if part == "..":
+            if done:
+                done.pop()
+            continue
+        here = os.path.join(root, *done, part)
+        if os.path.islink(here):
+            hops -= 1
+            if hops < 0:
+                return None
+            target = os.readlink(here)
+            if target.startswith("/"):
+                done = []
+            parts = [p for p in target.split("/") if p] + parts
+            continue
+        if not os.path.lexists(here):
+            return None
+        done.append(part)
+    return "/" + "/".join(done)
+
+
+def owners(root):
+    """{resolved path: package} for every regular file dpkg's lists record."""
+    out = {}
+    info = os.path.join(root, "var/lib/dpkg/info")
+    for name in sorted(os.listdir(info)):
+        if not name.endswith(".list"):
+            continue
+        pkg = name[: -len(".list")].split(":", 1)[0]
+        for line in read_text(os.path.join(info, name)).splitlines():
+            line = line.strip()
+            if not line.startswith("/"):
+                continue
+            head, tail = line.rsplit("/", 1)
+            parent = resolve_in(root, head or "/")
+            if parent is None or not tail:
+                continue
+            real = os.path.join(parent, tail)
+            full = inside(root, real)
+            if os.path.isfile(full) and not os.path.islink(full):
+                out.setdefault(real, pkg)
+    return out
+
+
+def read_rows(path):
+    """The first column of a data file's non-comment rows. The file must be
+    there: a wrong --data would otherwise read as an empty index."""
+    if not os.path.isfile(path):
+        raise Refused(f"{path} is not there: --data names the directory the index stage wrote")
+    return {line.split("\t", 1)[0] for line in read_text(path).splitlines() if line.strip() and not line.strip().startswith("#")}
+
+
+def read_unowned(path, text=None):
+    """base-unowned.txt: <command><TAB><why>, each command held to the grammar,
+    none twice."""
+    out = {}
+    for n, line in enumerate((read_text(path) if text is None else text).splitlines(), 1):
+        if not line.strip() or line.strip().startswith("#"):
+            continue
+        row = line.split("\t")
+        if len(row) != 2 or not COMMAND.match(row[0]) or not row[1].strip():
+            raise Refused(f"{path}:{n}: want <command><TAB><why>, got {line!r}")
+        if row[0] in out:
+            raise Refused(f"{path}:{n}: {row[0]} is listed twice")
+        out[row[0]] = row[1]
+    return out
+
+
+def base_programs(root):
+    """{command: the path it resolves to} for every executable on the image's
+    PATH, the first directory winning, as a shell would find it."""
+    found = {}
+    for d in BASE_PATH:
+        real_dir = resolve_in(root, "/" + d)
+        if real_dir is None or not os.path.isdir(inside(root, real_dir)):
+            continue
+        for name in sorted(os.listdir(inside(root, real_dir))):
+            if name in found or not COMMAND.match(name):
+                continue
+            real = resolve_in(root, f"{real_dir}/{name}")
+            if real and os.path.isfile(inside(root, real)) and os.access(inside(root, real), os.X_OK):
+                found[name] = real
+    return found
+
+
+def base_scan(root, datadir, unowned_path):
+    """Index the base's own programs that have no row (agentry-dockerimages#23)."""
+    index_path = os.path.join(datadir, "commands.tsv")
+    ambiguous_path = os.path.join(datadir, "ambiguous.tsv")
+    indexed = read_rows(index_path)
+    ambiguous = read_rows(ambiguous_path)
+    unowned = read_unowned(unowned_path)
+    owned = owners(root)
+    added, missing, bad_name = {}, [], []
+    for cmd, real in base_programs(root).items():
+        if cmd in indexed or cmd in unowned:
+            continue
+        pkg = owned.get(real)
+        if not pkg:
+            missing.append(f"{cmd} ({real})")
+        elif not PACKAGE.match(pkg):
+            bad_name.append(f"{cmd} ({real}, owned by {pkg!r})")
+        else:
+            added[cmd] = pkg
+    if bad_name:
+        raise Refused("programs on the base's PATH whose owning package is not a package name: " + ", ".join(bad_name))
+    if missing:
+        raise Refused("programs on the base's PATH that no package owns and base-unowned.txt does not name: " + ", ".join(missing))
+    if added:
+        with open(index_path, "a", encoding="utf-8") as fh:
+            fh.write("# command\tpackage: the base's own programs Contents does not list or leaves ambiguous, each to the package owning its target\n")
+            for cmd in sorted(added):
+                fh.write(f"{cmd}\t{added[cmd]}\n")
+    resolved = sorted(set(added) & ambiguous)
+    if resolved:
+        # The base itself settles which package ships them: out of the
+        # ambiguous list, so the two files never disagree.
+        keep = [line for line in read_text(ambiguous_path).splitlines(keepends=True)
+                if line.strip().startswith("#") or line.split("\t", 1)[0] not in resolved]
+        with open(ambiguous_path, "w", encoding="utf-8") as fh:
+            fh.writelines(keep)
+    print(f"base scan: {len(added)} of the base's own programs indexed ({', '.join(f'{c}={p}' for c, p in sorted(added.items())) or 'none'}; "
+          f"{len(resolved)} of them out of the ambiguous list), {len(unowned)} named in base-unowned.txt")
+    return added
+
+
+def base_scan_test():
+    """The base scan on a made-up image root."""
+    failures = []
+    with tempfile.TemporaryDirectory() as root:
+        def put(path, body="#!/bin/sh\n", mode=0o755):
+            full = os.path.join(root, path.lstrip("/"))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            os.chmod(full, mode)
+        def link(path, target):
+            full = os.path.join(root, path.lstrip("/"))
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            os.symlink(target, full)
+        # merged /usr: /bin and /sbin are links to usr/bin and usr/sbin
+        os.makedirs(os.path.join(root, "usr/bin"))
+        os.makedirs(os.path.join(root, "usr/sbin"))
+        link("/bin", "usr/bin")
+        link("/sbin", "usr/sbin")
+        put("/usr/bin/mawk")
+        link("/etc/alternatives/awk", "/usr/bin/mawk")
+        link("/usr/bin/awk", "/etc/alternatives/awk")          # an alternatives link
+        put("/usr/bin/which.debianutils")
+        link("/etc/alternatives/which", "/usr/bin/which.debianutils")
+        link("/usr/bin/which", "/etc/alternatives/which")
+        put("/usr/bin/tar")                                     # listed by dpkg as /bin/tar
+        link("/usr/sbin/rmt", "/etc/alternatives/rmt")
+        link("/etc/alternatives/rmt", "/usr/sbin/rmt-tar")
+        put("/usr/sbin/rmt-tar")
+        put("/usr/bin/python3")                                 # already in the index
+        put("/usr/sbin/policy-rc.d")                            # no package owns it
+        put("/usr/bin/README", mode=0o644)                      # not executable
+        link("/usr/bin/dangling", "/nowhere")
+        put("/usr/bin/[")                                       # not a command name
+        put("/usr/bin/python3.14")                              # ambiguous in Contents, owned here
+        link("/usr/bin/loop1", "/usr/bin/loop2")                # a link loop: skipped
+        link("/usr/bin/loop2", "/usr/bin/loop1")
+        info = os.path.join(root, "var/lib/dpkg/info")
+        os.makedirs(info)
+        lists = {"mawk:amd64": ["/usr/bin/mawk"], "debianutils": ["/usr/bin/which.debianutils"],
+                 "tar": ["/bin/tar", "/usr/sbin/rmt-tar"], "python3-minimal": ["/usr/bin/python3"],
+                 "python3.14-minimal:amd64": ["/usr/bin/python3.14"]}
+        for pkg, paths in lists.items():
+            with open(os.path.join(info, pkg + ".list"), "w", encoding="utf-8") as fh:
+                fh.write("/.\n/usr\n" + "\n".join(paths) + "\n")
+        data = os.path.join(root, "data")
+        os.makedirs(data)
+        with open(os.path.join(data, "commands.tsv"), "w", encoding="utf-8") as fh:
+            # what Contents gives: the real files, never the alternatives links; tar
+            # is left out so its ownership through dpkg's /bin/tar is exercised
+            fh.write("# header\npython3\tpython3-minimal\nmawk\tmawk\nwhich.debianutils\tdebianutils\nrmt-tar\ttar\n")
+        with open(os.path.join(data, "ambiguous.tsv"), "w", encoding="utf-8") as fh:
+            fh.write("# header\npython3.14\tpython3.14-minimal,python3.14-nopie\ntie\taaa,bbb\n")
+        unowned = os.path.join(root, "unowned.txt")
+        with open(unowned, "w", encoding="utf-8") as fh:
+            fh.write("# comment\n")
+        try:
+            base_scan(root, data, unowned)
+            failures.append("a PATH program no package owns was accepted")
+        except Refused as e:
+            if "policy-rc.d" not in str(e):
+                failures.append(f"the refusal does not name policy-rc.d: {e}")
+        with open(unowned, "w", encoding="utf-8") as fh:
+            fh.write("policy-rc.d\tthe container image's service hook\n")
+        added = base_scan(root, data, unowned)
+        want = {"awk": "mawk", "which": "debianutils", "tar": "tar", "rmt": "tar", "python3.14": "python3.14-minimal"}
+        if added != want:
+            failures.append(f"base scan added {added}, want {want}")
+        rows = read_text(os.path.join(data, "commands.tsv"))
+        if "awk\tmawk\n" not in rows or rows.count("python3\t") != 1:
+            failures.append(f"commands.tsv after the scan:\n{rows}")
+        amb = read_text(os.path.join(data, "ambiguous.tsv"))
+        if "python3.14" in amb or "tie\taaa,bbb" not in amb:
+            failures.append(f"ambiguous.tsv after the scan:\n{amb}")
+        if base_scan(root, data, unowned):
+            failures.append("a second scan added rows the first already wrote")
+        try:
+            base_scan(root, os.path.join(root, "nowhere"), unowned)
+            failures.append("a --data directory with no index was read as an empty index")
+        except Refused:
+            pass
+        put("/usr/bin/odd")
+        with open(os.path.join(info, "Bad_Name.list"), "w", encoding="utf-8") as fh:
+            fh.write("/usr/bin/odd\n")
+        try:
+            base_scan(root, data, unowned)
+            failures.append("an owner that is no package name was accepted")
+        except Refused as e:
+            if "not a package name" not in str(e):
+                failures.append(f"an owner that is no package name was refused as {e}")
+        for name, text in {"a command that is no command name": "$(x)\twhy\n",
+                           "a command listed twice": "a\tone\na\ttwo\n", "no reason": "a\t \n"}.items():
+            try:
+                read_unowned("base-unowned.txt", text)
+                failures.append(f"base-unowned.txt with {name} was accepted")
+            except Refused:
+                pass
+    return failures
+
+
 def self_test():
     """Each rule, on made-up Contents, Packages and extras."""
     contents = "\n".join([
@@ -321,6 +579,8 @@ def self_test():
     if listed != {"main/Contents-amd64.gz": ("abc", 12)}:
         failures.append(f"release_hashes read {listed}")
 
+    failures += base_scan_test()
+
     for f in failures:
         print(f"FAIL make-index self-test: {f}")
     if not failures:
@@ -332,13 +592,25 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-extras", metavar="FILE")
+    ap.add_argument("--check-unowned", metavar="FILE")
     ap.add_argument("--arch")
     ap.add_argument("--dir")
     ap.add_argument("--extras")
     ap.add_argument("--out")
+    ap.add_argument("--base-scan", metavar="ROOT")
+    ap.add_argument("--data", metavar="DIR")
+    ap.add_argument("--unowned", metavar="FILE")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
+    if args.check_unowned:
+        try:
+            n = len(read_unowned(args.check_unowned))
+        except Refused as e:
+            print(f"REFUSED: {e}", file=sys.stderr)
+            return 1
+        print(f"ok   {args.check_unowned}: {n} rows, each a command and its reason")
+        return 0
     if args.check_extras:
         try:
             check_extras(read_text(args.check_extras), name=args.check_extras)
@@ -346,6 +618,15 @@ def main():
             print(f"REFUSED: {e}", file=sys.stderr)
             return 1
         print(f"ok   {args.check_extras}: the closed recipe set")
+        return 0
+    if args.base_scan:
+        if not (args.data and args.unowned):
+            ap.error("--base-scan needs --data and --unowned")
+        try:
+            base_scan(args.base_scan, args.data, args.unowned)
+        except Refused as e:
+            print(f"REFUSED: {e}", file=sys.stderr)
+            return 1
         return 0
     if not (args.arch and args.dir and args.extras and args.out):
         ap.error("--arch, --dir, --extras and --out are required")

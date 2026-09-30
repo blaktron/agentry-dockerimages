@@ -1,0 +1,4 @@
+# Programs on the base image's PATH that no Debian package owns, and why each
+# is not indexed (make-index.py --base-scan; agentry-dockerimages#23). One
+# row per program: <command><TAB><why>. The build fails on any other.
+policy-rc.d	the Debian container image's hook that stops services starting during apt-get install; not a program a QuickAgent runs
