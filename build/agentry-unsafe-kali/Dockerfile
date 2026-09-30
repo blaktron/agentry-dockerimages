@@ -60,6 +60,16 @@ RUN for try in 1 2 3 4 5; do apt-get update && break; [ "$try" = 5 ] && exit 1; 
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 COPY --from=index /out/ /etc/agentry/unsafe/
+# Index the programs this base already carries that the index lacks
+# (agentry-dockerimages#23): alternatives links such as awk, which and pager,
+# which Contents does not list, and programs Contents left ambiguous, such as
+# python3.14. Each gets a row naming the package that owns its target, read
+# from dpkg's lists after the installs above, so the CLI never calls a program
+# the run can start unavailable. A program on the PATH that no package owns
+# fails the build unless base-unowned.txt names it. The build context is bound
+# for this step only, so neither file stays in a layer.
+RUN --mount=type=bind,target=/tmp/unsafe-index \
+	python3 -B /tmp/unsafe-index/make-index.py --base-scan / --data /etc/agentry/unsafe --unowned /tmp/unsafe-index/base-unowned.txt
 
 LABEL org.opencontainers.image.title="agentry-unsafe-kali" \
 	org.opencontainers.image.source="https://github.com/blaktron/agentry-dockerimages" \

@@ -135,7 +135,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs and the Unsafe Mode image's index generator and extras list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali` and asserts that every fixture command resolves (`CONTAINER` picks the runtime, `PLATFORM` the architecture). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs and the Unsafe Mode image's index generator and extras list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -174,7 +174,14 @@ It is a lean Kali Linux (`kali-rolling`): `ca-certificates`, `python3` and
   `Packages` for the image's own architecture. Each file is first held to the
   SHA-256 in Kali's `InRelease`, whose signature `apt-get update` has checked.
   A command several packages ship takes the package named like the command,
-  then the one package of priority standard or higher.
+  then the one package of priority standard or higher. Then, in the finished
+  image, the programs it already carries that Contents does not list
+  (alternatives links such as `awk`, `which` and `pager`) or left ambiguous
+  (`python3.14`) get a row naming the package that owns the file each resolves
+  to, from dpkg's own lists (agentry-dockerimages#23). A program on the PATH
+  that no package owns fails the build unless
+  `build/agentry-unsafe-kali/base-unowned.txt` names it with a reason; only
+  `policy-rc.d`, the Debian container image's service hook, is there.
 - **`ambiguous.tsv`.** The commands that rule leaves undecided. They are left
   out of the index, never guessed.
 - **`extras.tsv`, the extras list.** It is maintained by hand for commands no
