@@ -41,6 +41,23 @@ Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
 upstream component.
 
+### agentry-unsafe-kali
+
+    Base:       kalilinux/kali-rolling, by digest (images.tsv, agentry-kali-rolling)
+    Context:    build/agentry-unsafe-kali/
+    Our image:  agentry-unsafe-kali
+
+A Kali Linux base with Debian and Kali packages installed from Kali's archive
+(`ca-certificates`, `python3`, `python3-venv` and what they depend on), each
+under its own licence as recorded in `/usr/share/doc/<package>/copyright`
+inside the image. What we add is ours, under MIT: the command index and the
+list of ambiguous commands under `/etc/agentry/unsafe/`, which are generated
+from Kali's published `Contents` and `Packages` indexes, and the extras list.
+The image installs no tool the extras list names; the CLI installs those per
+QuickAgent, from Kali's archive and PyPI, under their own licences. Kali Linux
+is a trademark of OffSec Services Limited, used here only to identify the
+upstream distribution; nothing built here is a Kali or OffSec product.
+
 ## Mirrored unchanged
 
 Each of these is copied byte-for-byte; the destination digest equals the
@@ -58,6 +75,7 @@ naming them — see each upstream repository.
 | `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
+| `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
 
 "See upstream" means this repository has not audited the full dependency licence
 set of that image, and does not claim to. Mirroring preserves whatever terms the

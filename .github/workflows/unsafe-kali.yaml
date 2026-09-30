@@ -1,0 +1,116 @@
+# Build and publish agentry-unsafe-kali, the base of the desktop's Unsafe Mode
+# exec images (agentry-notes plans/unsafe-mode.md §4.1, D9, D10;
+# agentry-dockerimages#15), to ghcr.io/blaktron.
+#
+# Manual dispatch only. The base is re-pinned by hand, monthly and on demand
+# (D10): scripts/pin.sh reports that kalilinux/kali-rolling has moved, the new
+# digest goes into images.tsv in a pull request, and this workflow is run on
+# the result. Each run is tagged with its UTC date, so a rebuild is a new tag
+# and a new digest; the images.tsv row then takes the new digest.
+#
+# Each architecture is built natively (D9): amd64 on ubuntu-latest, arm64 on
+# ubuntu-24.04-arm. The command index is made from that architecture's Kali
+# Contents, and the fixture check runs on each image before the two are
+# joined. This repository is public, so both runners are free, and each is a
+# fresh virtual machine per job. Pushing uses the workflow's GITHUB_TOKEN
+# with packages: write; a package this workflow creates is public.
+name: unsafe-kali
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: unsafe-kali
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
+
+      - name: The tag, the build's UTC date
+        id: tag
+        run: echo "tag=$(date -u +%Y.%m.%d)" >>"$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Mirror the Kali base by digest
+        run: ./scripts/mirror.sh agentry-kali-rolling
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push this architecture
+        run: PUSH=1 ./scripts/build.sh agentry-unsafe-kali
+
+      - name: Every fixture command resolves on this architecture
+        run: ./scripts/check.sh --unsafe-image "ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG-${PLATFORM##*/}"
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Join the architectures into one tag
+        run: ./scripts/build.sh --merge agentry-unsafe-kali
+
+      - name: The joined tag still resolves every fixture command
+        run: ./scripts/check.sh --unsafe-image "ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG"
+
+      - name: The row for images.tsv
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/blaktron/agentry-unsafe-kali:$IMAGE_TAG"
+          digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')
+          {
+            echo "### agentry-unsafe-kali:$IMAGE_TAG"
+            echo
+            echo "\`$ref@$digest\`"
+            echo
+            docker buildx imagetools inspect "$ref" | sed 's/^/    /'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "$ref@$digest"
