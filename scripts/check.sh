@@ -14,10 +14,14 @@
 #   - a build context's bases.env names a ref that has no row in images.tsv;
 #   - the Unsafe Mode image's index generator fails its self-test, its
 #     extras list is not the closed recipe set, or base-unowned.txt is not
-#     one command and one reason a row (build/agentry-unsafe-kali).
+#     one command and one reason a row (build/agentry-unsafe-kali);
+#   - the files image's fixture list names a file that is not there, a
+#     fixture has no row, or a row names a decoder the image does not hold
+#     or no phrase
+#     (build/agentry-files).
 #
-# It pulls nothing and reads no credential, except in --unsafe-image mode,
-# which runs the image it names.
+# It pulls nothing and reads no credential, except in --unsafe-image and
+# --files-image mode, which run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -33,9 +37,19 @@
 #       the runtime (default docker; Apple's `container` on the Mac build
 #       host), and PLATFORM (e.g. linux/arm64) asks for, and checks, one
 #       architecture. It runs under macOS's bash 3.2.
+#   scripts/check.sh --files-image <ref>
+#       decode each fixture in build/agentry-files/fixtures/ inside a built
+#       agentry-files, with the argv the runner's decode role uses
+#       (agentry-cli runnerimage/decode), with no network, every capability
+#       dropped and a read-only root, and assert the phrase expect.tsv names
+#       (plan file-handling.md §4; agentry-dockerimages#28), as the invoking
+#       uid with the decode container's environment and limits. It prints the
+#       package record and fails on any setuid or setgid file. PLATFORM
+#       (e.g. linux/arm64) asks for, and checks, one architecture.
 #
-# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image needs
-# a container runtime instead.
+# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image and
+# --files-image need a container runtime instead (--files-image one that takes
+# docker's run flags for the decode container's hardening).
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -142,6 +156,123 @@ checkUnsafe() {
 	return "$bad"
 }
 
+FILES_CTX=build/agentry-files
+
+# filesArgv <decoder> <fixture> sets argv to the decoder's command line exactly
+# as the runner's decode role builds it (agentry-cli runnerimage/decode:
+# absolute paths, fixed flags, the document's path the only variable), with
+# the text written under /out. It fails for a decoder the image does not hold.
+filesArgv() {
+	case "$1" in
+	pandoc) argv=(/usr/bin/pandoc --sandbox --to=plain --wrap=none --output=/out/text.txt "/in/$2") ;;
+	pdftotext) argv=(/usr/bin/pdftotext -layout -enc UTF-8 -q "/in/$2" /out/text.txt) ;;
+	tesseract) argv=(/usr/bin/tesseract "/in/$2" /out/text -l eng) ;;
+	*) return 1 ;;
+	esac
+}
+
+# checkFiles holds the files image's fixture list to the fixtures: each row
+# names a fixture that exists, a decoder the image holds and a phrase, and
+# each fixture has a row.
+checkFiles() {
+	local bad=0 f name tool phrase argv
+	while IFS=$'\t' read -r name tool phrase; do
+		case "$name" in '' | \#*) continue ;; esac
+		if [ ! -f "$FILES_CTX/fixtures/$name" ]; then
+			echo "$FILES_CTX/fixtures/expect.tsv: no fixture $name"
+			bad=1
+		fi
+		if ! filesArgv "$tool" "$name"; then
+			echo "$FILES_CTX/fixtures/expect.tsv: $name: unknown decoder ${tool:-(none)}"
+			bad=1
+		fi
+		if [ -z "$phrase" ]; then
+			echo "$FILES_CTX/fixtures/expect.tsv: $name: no phrase, so any text would pass"
+			bad=1
+		fi
+	done <"$FILES_CTX/fixtures/expect.tsv"
+	for f in "$FILES_CTX"/fixtures/*; do
+		name="${f##*/}"
+		[ "$name" = expect.tsv ] && continue
+		if ! awk -F'\t' -v n="$name" '$1 == n { found = 1 } END { exit !found }' "$FILES_CTX/fixtures/expect.tsv"; then
+			echo "$FILES_CTX/fixtures/$name: no row in expect.tsv"
+			bad=1
+		fi
+	done
+	return "$bad"
+}
+
+# filesImage decodes every fixture inside the image the way the CLI's decode
+# container runs a decoder (agentry-cli pkg/runner/decode Run and
+# runnerimage/decode): the invoking user's uid, no network, every capability
+# dropped, no new privileges, a read-only root, a 512 MiB /tmp, the fixtures
+# read-only, its environment, and the decoder run directly, not under a
+# shell. One difference: the binds are not relabelled for SELinux (the CLI
+# relabels directories it made; these are the checkout's own), so the check
+# turns labelling off for its container instead. It also fails on any
+# setuid or setgid file in the image.
+filesImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" name tool phrase argv out want arch bad=0 n=0
+	checkFiles || return 1
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	local run=("$runtime" run --rm --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--user "$(id -u):$(id -g)" --tmpfs /tmp:size=512m --pids-limit 256 --memory 2g
+		--env PATH=/usr/bin:/bin --env HOME=/tmp --env OMP_THREAD_LIMIT=1 --env LC_ALL=C.UTF-8
+		-v "$PWD/$FILES_CTX/fixtures:/in:ro" -v "$out:/out")
+	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
+	if [ -n "${PLATFORM:-}" ]; then
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --entrypoint /bin/uname "$ref" -m)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+	echo "packages:"
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/files/packages | sed 's/^/  /'
+	# The scan runs as root (the image's owner, still with no capability) so
+	# no directory is unreadable to it, and a scan that could not finish fails.
+	local suid f
+	if ! suid=$("${run[@]}" --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+	while IFS=$'\t' read -r name tool phrase; do
+		case "$name" in '' | \#*) continue ;; esac
+		n=$((n + 1))
+		filesArgv "$tool" "$name" || return 1
+		rm -f "$out"/text.txt "$out"/err
+		if "${run[@]}" --entrypoint "${argv[0]}" "$ref" "${argv[@]:1}" >/dev/null 2>"$out/err"; then
+			if grep -qF -- "$phrase" "$out/text.txt" 2>/dev/null; then
+				echo "ok   $name ($tool)"
+			else
+				echo "FAIL $name ($tool): decoded, but \"$phrase\" is not in the text"
+				bad=1
+			fi
+		else
+			echo "FAIL $name ($tool): the decoder failed:"
+			sed 's/^/     /' "$out/err" | tail -5
+			bad=1
+		fi
+	done <"$FILES_CTX/fixtures/expect.tsv"
+	[ "$n" -gt 0 ] || {
+		echo "FAIL no fixtures"
+		bad=1
+	}
+	return "$bad"
+}
+
 # unsafeImage reads the three files out of the image, resolves each fixture
 # command the way the CLI will (the extras list first, then the index), and
 # holds every program on the image's own PATH to having a row.
@@ -205,7 +336,7 @@ unsafeImage() {
 
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -229,6 +360,10 @@ fork checkWorkflows
 bases checkBases
 extras checkUnsafe
 unowned checkUnsafe
+fixture checkFiles
+decoder checkFiles
+unlisted checkFiles
+phrase checkFiles
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -245,6 +380,10 @@ breakCase() {
 	bases) printf 'EXTRA_IMAGE=example/unmirrored:1\n' >>build/docker-agent/bases.env ;;
 	extras) printf 'pip\tx\tx>=1\n' >>build/agentry-unsafe-kali/extras.tsv ;;
 	unowned) printf 'policy-rc.d\ttwice\n' >>build/agentry-unsafe-kali/base-unowned.txt ;;
+	fixture) printf 'missing.docx\tpandoc\tx\n' >>build/agentry-files/fixtures/expect.tsv ;;
+	decoder) sed -i 's/^policy.docx\tpandoc\t/policy.docx\tlibreoffice\t/' build/agentry-files/fixtures/expect.tsv ;;
+	unlisted) cp build/agentry-files/fixtures/memo.rtf build/agentry-files/fixtures/unlisted.rtf ;;
+	phrase) sed -i 's/^memo.rtf\tpandoc\t.*/memo.rtf\tpandoc\t/' build/agentry-files/fixtures/expect.tsv ;;
 	esac
 }
 
@@ -285,9 +424,16 @@ case "${1:-}" in
 	}
 	unsafeImage "$2"
 	;;
+--files-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --files-image <ref>" >&2
+		exit 2
+	}
+	filesImage "$2"
+	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref>]" >&2
 	exit 2
 	;;
 esac
