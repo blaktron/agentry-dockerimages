@@ -16,7 +16,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
-| `agentry-files` (first build pending) | `alpine:3.22` + `build/agentry-files/` | build | the decoders of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
+| `agentry-files:2026.10.02.1` | `alpine:3.22` + `build/agentry-files/` | build | the decoders of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -295,6 +295,14 @@ cosign verify ghcr.io/blaktron/agentry-files@<digest> \
   --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/files.yaml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+The first build is `ghcr.io/blaktron/agentry-files:2026.10.02.1@sha256:0d35fb3a5239f4571ba0d36d6619250d030bef119ee40e8f765dc3b38428b140`
+(run 36997044715, 2026-10-02): both architectures decoded all eight fixtures
+before their push and the joined digest again before it was signed; the
+signature verified from the workstation the same day, and an anonymous
+manifest fetch answered 200. Its packages: `pandoc-cli-3.6.4-r0`,
+`poppler-utils-25.04.0-r0`, `tesseract-ocr-5.5.0-r2`,
+`tesseract-ocr-data-eng-5.5.0-r2`.
 
 The `agentry-files` row in `images.tsv` then takes the tag and its digest, and
 the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
