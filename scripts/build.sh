@@ -24,6 +24,11 @@
 #                                                   # one architecture, tagged <tag>-arm64
 #   IMAGE_TAG=… scripts/build.sh --merge <name>     # join <tag>-<arch> for each of
 #                                                   # PLATFORMS into <tag>; prints its digest
+#   PART_DIGESTS='amd64=sha256:… arm64=sha256:…' IMAGE_TAG=… scripts/build.sh --merge <name>
+#                                                   # join those digests, not whatever the
+#                                                   # <tag>-<arch> tags point at now, refuse
+#                                                   # an IMAGE_TAG that exists, and check the
+#                                                   # joined index lists exactly them
 #
 # Needs docker, and for an upstream context git and network access to it; for
 # PUSH=1 and --merge a `docker login ghcr.io` with write access. Reads no
@@ -67,18 +72,67 @@ if [ -z "$IMAGE_TAG" ]; then
 fi
 dst="$REGISTRY/$IMAGE_NAME:$IMAGE_TAG"
 
+# imageManifests <ref> prints the digest of each image manifest <ref> names:
+# its own digest for a single image, its platform entries for an index.
+imageManifests() {
+	local ref="$1"
+	docker buildx imagetools inspect "$ref" --raw | python3 -c '
+import json, sys
+ref = sys.argv[1]
+doc = json.load(sys.stdin)
+if "manifests" not in doc:
+    print(ref.rsplit("@", 1)[1])
+for m in doc.get("manifests", []):
+    if m.get("platform", {}).get("os", "unknown") != "unknown":
+        print(m["digest"])
+' "$ref"
+}
+
 if [ "$merge" = 1 ]; then
 	[ -n "$PLATFORMS" ] || {
 		echo "$ctx builds one platform; there is nothing to merge" >&2
 		exit 2
 	}
 	parts=()
-	for p in ${PLATFORMS//,/ }; do
-		parts+=("$dst-${p##*/}")
-	done
+	if [ -n "${PART_DIGESTS:-}" ]; then
+		# By digest: a tag can be re-pointed between the push that was checked
+		# and this merge, a digest cannot (agentry-dockerimages#28).
+		for p in ${PLATFORMS//,/ }; do
+			d=$(tr ' ' '\n' <<<"$PART_DIGESTS" | sed -n "s/^${p##*/}=//p")
+			[[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+				echo "PART_DIGESTS has no digest for ${p##*/}" >&2
+				exit 2
+			}
+			parts+=("$REGISTRY/$IMAGE_NAME@$d")
+		done
+		if docker buildx imagetools inspect "$dst" >/dev/null 2>&1; then
+			echo "$dst exists; a rebuild is a new tag" >&2
+			exit 1
+		fi
+	else
+		for p in ${PLATFORMS//,/ }; do
+			parts+=("$dst-${p##*/}")
+		done
+	fi
 	echo "merge ${parts[*]} → $dst"
 	docker buildx imagetools create -t "$dst" "${parts[@]}"
-	echo "merged; digest: $(docker buildx imagetools inspect "$dst" --format '{{.Manifest.Digest}}')"
+	digest=$(docker buildx imagetools inspect "$dst" --format '{{.Manifest.Digest}}')
+	if [ -n "${PART_DIGESTS:-}" ]; then
+		# Hold the digest about to be reported, read by itself, to listing
+		# exactly the images of the parts that were checked. A part pushed
+		# as an index (an image and its build attestation) contributes its
+		# image manifests; attestation entries (platform unknown) are not
+		# images and are left out on both sides.
+		want=$(for part in "${parts[@]}"; do imageManifests "$part"; done | sort)
+		got=$(imageManifests "$REGISTRY/$IMAGE_NAME@$digest" | sort)
+		if [ -z "$want" ] || [ "$got" != "$want" ]; then
+			echo "the joined index $digest does not list exactly the checked parts" >&2
+			echo "want: $want" >&2
+			echo "got:  $got" >&2
+			exit 1
+		fi
+	fi
+	echo "merged; digest: $digest"
 	exit 0
 fi
 

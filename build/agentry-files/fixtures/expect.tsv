@@ -1,0 +1,14 @@
+# fixture	decoder	a phrase only that document holds
+# The fixtures are the CLI's Knowledge Creator corpus
+# (agentry-cli pkg/knowledge/creator/testdata/corpus), and the phrases are the
+# ones its TestDecodeTheCorpusForReal asserts. scripts/check.sh --files-image
+# decodes each with the argv the runner's decode role uses
+# (agentry-cli runnerimage/decode), with no network.
+policy.docx	pandoc	45-minute break
+memo.rtf	pandoc	Antwerp is ANR
+handbook.epub	pandoc	doors 7 to 12 for inbound
+incident.pdf	pdftotext	fuel filter was clogged
+whiteboard.png	tesseract	FOR ALARMED REEFERS
+scan.tif	tesseract	FOR ALARMED REEFERS
+photo.jpg	tesseract	FOR ALARMED REEFERS
+sign.webp	tesseract	FOR ALARMED REEFERS
