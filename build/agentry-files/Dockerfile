@@ -18,8 +18,10 @@
 #   poppler-utils            .pdf                   (pdftotext)
 #   tesseract-ocr, -data-eng images, English OCR    (tesseract)
 #
-# /etc/agentry/files/packages lists the package versions apk resolved, one
-# `name-version` a line, so a receipt can name them.
+# PACKAGES is the one list of what is installed: apk brings their dependencies
+# (libraries and data, no setuid program), nothing else is added.
+# /etc/agentry/files/packages records the version apk resolved for each of
+# PACKAGES, one `name-version` a line, so a receipt can name them.
 #
 # scripts/build.sh passes ALPINE_IMAGE as our digest-pinned mirror of
 # alpine:3.22, the runner image's own runtime base.
@@ -27,14 +29,15 @@
 ARG ALPINE_IMAGE=alpine:3.22
 
 FROM ${ALPINE_IMAGE}
+ARG PACKAGES="pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng"
 # The index fetch from Alpine's CDN fails now and then (plan §1.1 measured one
 # try in six from a sandbox host). `apk add --no-cache` fetches the indexes
 # itself, so the whole add is retried half a minute apart; a failure is never
 # taken as a success.
 RUN for try in 1 2 3 4 5; do \
-		apk add --no-cache pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng && break; \
+		apk add --no-cache $PACKAGES && break; \
 		[ "$try" = 5 ] && exit 1; sleep 30; \
 	done \
 	&& mkdir -p /etc/agentry/files \
-	&& apk list --installed pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng | cut -d' ' -f1 >/etc/agentry/files/packages \
-	&& test "$(wc -l </etc/agentry/files/packages)" -eq 4
+	&& apk list --installed $PACKAGES | cut -d' ' -f1 >/etc/agentry/files/packages \
+	&& set -- $PACKAGES && test "$(wc -l </etc/agentry/files/packages)" -eq "$#"

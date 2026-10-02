@@ -137,7 +137,7 @@ base is the default built into the CLI and cannot be changed from
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
 | `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network ([below](#the-files-image)). |
-| `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`. |
+| `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
 no credentials: run `docker login ghcr.io` first, and `docker login` for
@@ -254,7 +254,8 @@ D3, D4; agentry-dockerimages#28):
 | `tesseract-ocr`, `tesseract-ocr-data-eng` | images, English OCR | `tesseract` |
 
 It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
-those packages added and nothing else. `/etc/agentry/files/packages` lists
+those packages and their dependencies (libraries and data; no setuid or
+setgid file, which the check below asserts) and nothing else. `/etc/agentry/files/packages` lists
 the versions apk resolved, one `name-version` a line, for the receipt.
 
 **Why it exists.** Until it, the CLI built this image at run time with
@@ -267,19 +268,25 @@ runner (agentry-cli#559). The decode container still runs with no network,
 every capability dropped and a read-only root (DR-39).
 
 **The fixture check.** `scripts/check.sh --files-image <ref>` decodes each
-file in `build/agentry-files/fixtures/` (six documents from the CLI's
-Knowledge Creator corpus) with the argv the runner's decode role uses, in a
-container with no network, every capability dropped and a read-only root, and
-asserts the phrase `expect.tsv` names for it.
+file in `build/agentry-files/fixtures/` (eight documents and images from the
+CLI's Knowledge Creator corpus) the way the CLI's decode container runs a
+decoder: the decode role's argv with absolute paths, the invoking uid, no
+network, every capability dropped, a read-only root, a 512 MiB `/tmp` and the
+role's environment. It asserts the phrase `expect.tsv` names for each, and
+fails on any setuid or setgid file in the image.
 
 **Publishing and signing.** The `files` workflow (manual dispatch, from
 `main` only):
 - builds each architecture natively (amd64 on `ubuntu-latest`, arm64 on
   `ubuntu-24.04-arm`) and runs the fixture check on each before pushing it;
-- joins them into one tag named for the UTC build date and the run number,
-  refusing a tag that already exists, and checks the joined image;
-- signs the joined digest with cosign, keyless, as the workflow itself, and
-  verifies the signature before reporting the `images.tsv` row.
+- hands the merge the digest each push produced, never a tag, and joins
+  those digests into one tag named for the UTC build date and the run
+  number, refusing a tag that already exists;
+- holds the joined index to listing exactly those images, checks it by its
+  digest, and signs that same digest with cosign, keyless, as the workflow
+  itself, then verifies the signature before reporting the `images.tsv` row.
+  A tag can be re-pointed by anything with write access to the package; a
+  digest cannot, so what is signed is what was checked.
 
 Verify a published digest with:
 
@@ -290,7 +297,9 @@ cosign verify ghcr.io/blaktron/agentry-files@<digest> \
 ```
 
 The `agentry-files` row in `images.tsv` then takes the tag and its digest, and
-the CLI pins that digest. A rebuild is a new tag and a new digest, never an
+the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
+the pinned digest, and the sandbox hosts run it when they pre-pull the image
+(the CLI itself pulls by digest only). A rebuild is a new tag and a new digest, never an
 overwrite. Later milestones of the plan add Apache Tika and libarchive (M3,
 agentry-dockerimages#29) and ClamAV (M5, agentry-dockerimages#30).
 

@@ -10,3 +10,5 @@ handbook.epub	pandoc	doors 7 to 12 for inbound
 incident.pdf	pdftotext	fuel filter was clogged
 whiteboard.png	tesseract	FOR ALARMED REEFERS
 scan.tif	tesseract	FOR ALARMED REEFERS
+photo.jpg	tesseract	FOR ALARMED REEFERS
+sign.webp	tesseract	FOR ALARMED REEFERS
