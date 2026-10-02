@@ -1,0 +1,173 @@
+# Build, check, sign and publish agentry-files, the files image the runner's
+# decode step runs (agentry-notes plans/file-handling.md §4, D3, D4;
+# agentry-dockerimages#28), to ghcr.io/blaktron.
+#
+# Dispatched by hand, from main only: a run with packages: write can push any
+# tag this repository's packages hold, so a branch's workflow file never gets
+# that. Each run is tagged with its UTC date and run number and refuses a tag
+# that exists, so a rebuild is a new tag and a new digest; the agentry-files
+# row in images.tsv then takes it, and the CLI pins that digest.
+#
+# The image is Alpine (our mirror of alpine:3.22, the runner image's own
+# runtime base) with the decoders added by apk. The CDN fetch happens here,
+# once, and never inside a person's run (plan §1.1).
+#
+# Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
+# ubuntu-24.04-arm, and every fixture is decoded inside it, with no network,
+# before it is pushed. The joined tag is checked again, then signed with
+# cosign, keyless, as this workflow on main (id-token: write), and the
+# signature is verified against that identity before the run reports the
+# images.tsv row. This repository is public, so both runners are free, and
+# each is a fresh virtual machine per job. Pushing uses the workflow's
+# GITHUB_TOKEN; a package this workflow creates is public.
+name: files
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: files
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Refuse any branch but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::dispatch this workflow from main; it pushes and signs public images"
+          exit 1
+
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Choose the tag, the UTC date and the run number, and refuse one that exists
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          if docker buildx imagetools inspect "ghcr.io/blaktron/agentry-files:$tag" >/dev/null 2>&1; then
+            echo "::error::ghcr.io/blaktron/agentry-files:$tag exists; a rebuild is a new tag"
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      # Each architecture checks and pushes on its own; a re-run of a failed
+      # job completes the pair. The merge waits for both.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build this architecture
+        run: ./scripts/build.sh agentry-files
+
+      - name: Decode every fixture inside it, with no network
+        run: ./scripts/check.sh --files-image "ghcr.io/blaktron/agentry-files:$IMAGE_TAG-${PLATFORM##*/}"
+
+      - name: Push this architecture
+        run: docker push "ghcr.io/blaktron/agentry-files:$IMAGE_TAG-${PLATFORM##*/}"
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      # cosign's keyless signature: the workflow's OIDC identity is the
+      # signing identity the CLI and the sandbox hosts verify.
+      id-token: write
+    env:
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+      IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/files.yaml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Join the architectures into one tag
+        run: ./scripts/build.sh --merge agentry-files | tee merge.out
+
+      - name: Decode every fixture with the joined tag
+        run: ./scripts/check.sh --files-image "ghcr.io/blaktron/agentry-files:$IMAGE_TAG"
+
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign the joined digest, keyless
+        run: |
+          set -euo pipefail
+          digest=$(sed -n 's/^merged; digest: //p' merge.out)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest from the merge"; exit 1; }
+          cosign sign --yes "ghcr.io/blaktron/agentry-files@$digest"
+          echo "DIGEST=$digest" >>"$GITHUB_ENV"
+
+      - name: Verify the signature against this workflow's identity
+        run: |
+          cosign verify "ghcr.io/blaktron/agentry-files@$DIGEST" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" >/dev/null
+          echo "verified $DIGEST as $IDENTITY"
+
+      - name: Write the images.tsv row and the signing identity to the run's summary
+        run: |
+          set -euo pipefail
+          row=$(printf 'agentry-files\tghcr.io/blaktron/agentry-files:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
+            "the files image: the decoders of the runner's decode step (pandoc, pdftotext, tesseract), amd64 and arm64, signed keyless by the files workflow (agentry-cli images.files)")
+          {
+            echo "### agentry-files:$IMAGE_TAG"
+            echo
+            echo '```'
+            echo "$row"
+            echo '```'
+            echo
+            echo "Signed keyless; verify with:"
+            echo
+            echo '```'
+            echo "cosign verify ghcr.io/blaktron/agentry-files@$DIGEST --certificate-identity $IDENTITY --certificate-oidc-issuer $ISSUER"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "$row"
