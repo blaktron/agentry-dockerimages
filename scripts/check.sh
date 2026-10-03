@@ -90,7 +90,7 @@ checkScripts() {
 			bad=1
 		}
 	done
-	shellcheck scripts/*.sh || bad=1
+	shellcheck scripts/*.sh build/agentry-files/tika-app || bad=1
 	return "$bad"
 }
 
@@ -166,6 +166,9 @@ filesArgv() {
 	case "$1" in
 	pandoc) argv=(/usr/bin/pandoc --sandbox --to=plain --wrap=none --output=/out/text.txt "/in/$2") ;;
 	pdftotext) argv=(/usr/bin/pdftotext -layout -enc UTF-8 -q "/in/$2" /out/text.txt) ;;
+	tika-text) argv=(/usr/bin/tika-app --text "/in/$2") ;;
+	tika-xml) argv=(/usr/bin/tika-app --xml "/in/$2") ;;
+	tika-detect) argv=(/usr/bin/tika-app --detect "/in/$2") ;;
 	tesseract) argv=(/usr/bin/tesseract "/in/$2" /out/text -l eng) ;;
 	*) return 1 ;;
 	esac
@@ -212,8 +215,9 @@ checkFiles() {
 # turns labelling off for its container instead. It also fails on any
 # setuid or setgid file in the image.
 filesImage() {
-	local ref="$1" runtime="${CONTAINER:-docker}" name tool phrase argv out want arch bad=0 n=0
+	local ref="$1" runtime="${CONTAINER:-docker}" name tool phrase argv out want arch bad=0 n=0 archive listing
 	checkFiles || return 1
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
 	out=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: out is local
 	trap "rm -rf '$out'" EXIT
@@ -233,6 +237,14 @@ filesImage() {
 		fi
 		echo "ok   architecture $arch"
 	fi
+	for archive in zip tar 7z rar; do
+		if listing=$("${run[@]}" -v "$PWD/$FILES_CTX/archives:/archives:ro" --entrypoint /usr/bin/bsdtar "$ref" -tf "/archives/sample.$archive") && [ -n "$listing" ]; then
+			echo "ok   bsdtar lists $archive"
+		else
+			echo "FAIL bsdtar could not list $archive"
+			bad=1
+		fi
+	done
 	echo "packages:"
 	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/files/packages | sed 's/^/  /'
 	# The scan runs as root (the image's owner, still with no capability) so
@@ -253,7 +265,8 @@ filesImage() {
 		n=$((n + 1))
 		filesArgv "$tool" "$name" || return 1
 		rm -f "$out"/text.txt "$out"/err
-		if "${run[@]}" --entrypoint "${argv[0]}" "$ref" "${argv[@]:1}" >/dev/null 2>"$out/err"; then
+		if "${run[@]}" --entrypoint "${argv[0]}" "$ref" "${argv[@]:1}" >"$out/stdout" 2>"$out/err"; then
+			case "$tool" in tika-*) cp "$out/stdout" "$out/text.txt" ;; esac
 			if grep -qF -- "$phrase" "$out/text.txt" 2>/dev/null; then
 				echo "ok   $name ($tool)"
 			else

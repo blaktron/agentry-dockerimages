@@ -29,7 +29,7 @@
 ARG ALPINE_IMAGE=alpine:3.22
 
 FROM ${ALPINE_IMAGE}
-ARG PACKAGES="pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng"
+ARG PACKAGES="pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng openjdk17-jre-headless libarchive-tools file"
 # The index fetch from Alpine's CDN fails now and then (plan §1.1 measured one
 # try in six from a sandbox host). `apk add --no-cache` fetches the indexes
 # itself, so the whole add is retried half a minute apart; a failure is never
@@ -41,3 +41,14 @@ RUN for try in 1 2 3 4 5; do \
 	&& mkdir -p /etc/agentry/files \
 	&& apk list --installed $PACKAGES | cut -d' ' -f1 >/etc/agentry/files/packages \
 	&& set -- $PACKAGES && test "$(wc -l </etc/agentry/files/packages)" -eq "$#"
+
+# Tika's runnable jar includes its parser dependencies. Pin the Apache release
+# by SHA-512; a mirror returning different bytes fails the build.
+ARG TIKA_VERSION=3.3.2
+ARG TIKA_SHA512=88c2032cba0d45feea361e6eebd2918bd04707614cdda5d89a1b167da5503c98e7b4cd368336f0402d559abcaf5006fcc7c825c32c749ae0417ea2f3b8423aba
+ADD https://repo.maven.apache.org/maven2/org/apache/tika/tika-app/${TIKA_VERSION}/tika-app-${TIKA_VERSION}.jar /opt/tika/tika-app.jar
+RUN echo "$TIKA_SHA512  /opt/tika/tika-app.jar" | sha512sum -c - \
+    && chmod 644 /opt/tika/tika-app.jar \
+    && printf 'tika-app-%s\n' "$TIKA_VERSION" >>/etc/agentry/files/packages
+COPY tika-app /usr/bin/tika-app
+RUN chmod 755 /usr/bin/tika-app

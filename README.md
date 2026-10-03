@@ -252,11 +252,18 @@ D3, D4; agentry-dockerimages#28):
 | `pandoc-cli` | `.docx`, `.odt`, `.epub`, `.rtf` | `pandoc --sandbox` |
 | `poppler-utils` | `.pdf` | `pdftotext` |
 | `tesseract-ocr`, `tesseract-ocr-data-eng` | images, English OCR | `tesseract` |
+| Apache Tika 3.3.2, `openjdk17-jre-headless` | the long tail, detection by content | `tika-app --detect`, `--text`, `--xml` |
+| `libarchive-tools` | ZIP, TAR, 7z, RAR and other archives | `bsdtar` |
+| `file` (libmagic) | fast content detection | `file --mime-type` |
 
 It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
 those packages and their dependencies (libraries and data; no setuid or
 setgid file, which the check below asserts) and nothing else. `/etc/agentry/files/packages` lists
-the versions apk resolved, one `name-version` a line, for the receipt.
+the versions apk resolved and Tika's version, one `name-version` a line,
+for the receipt. Tika's runnable jar is pinned to Apache's SHA-512 and its
+wrapper bounds the heap to 512 MiB. Its upstream licence and notices stay
+in the jar. The M3 amd64 local image is 262,592,296 bytes (Docker's image
+size); the workflow reports each architecture's size when it builds.
 
 **Why it exists.** Until it, the CLI built this image at run time with
 `apk add` from Alpine's CDN, inside the run. On 2026-10-02 that fetch failed in
@@ -273,7 +280,9 @@ CLI's Knowledge Creator corpus) the way the CLI's decode container runs a
 decoder: the decode role's argv with absolute paths, the invoking uid, no
 network, every capability dropped, a read-only root, a 512 MiB `/tmp` and the
 role's environment. It asserts the phrase `expect.tsv` names for each, and
-fails on any setuid or setgid file in the image.
+fails on any setuid or setgid file in the image. Tika detects the DOCX's
+content type and extracts its phrase as text and XHTML. Real ZIP, TAR, 7z
+and RAR fixtures are listed by bsdtar under the same containment.
 
 **Publishing and signing.** The `files` workflow (manual dispatch, from
 `main` only):
@@ -308,8 +317,8 @@ The `agentry-files` row in `images.tsv` then takes the tag and its digest, and
 the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
 the pinned digest, and the sandbox hosts run it when they pre-pull the image
 (the CLI itself pulls by digest only). A rebuild is a new tag and a new digest, never an
-overwrite. Later milestones of the plan add Apache Tika and libarchive (M3,
-agentry-dockerimages#29) and ClamAV (M5, agentry-dockerimages#30).
+overwrite. M3 adds Apache Tika and libarchive (agentry-dockerimages#29). M5 adds
+ClamAV (agentry-dockerimages#30).
 
 ## Building Docker Agent from source
 
