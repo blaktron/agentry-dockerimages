@@ -88,3 +88,18 @@ from `agentry-cli/runnerimage/`, the per-release exec images, and the per-releas
 MCP-server install images — are built by the CLI from contexts embedded in its
 own binary, under that repository's licence. This repository changes where their
 *bases* come from, not what they are.
+
+## agentry-files
+
+Apache Tika 3.3.2 (https://tika.apache.org), distributed unchanged as its
+SHA-512-pinned tika-app jar, is Apache-2.0. Its LICENSE and NOTICE, including
+its dependencies' notices, are preserved in the jar's META-INF directory.
+OpenJDK, libarchive and libmagic are installed from Alpine with their own
+package licences. The wrapper we add is ours, under MIT.
+
+The sample RAR and 7z fixtures in build/agentry-files/archives are decoded
+from libarchive v3.8.1's test_read_format_rar.rar.uu and
+test_read_format_7zip_copy.7z.uu, respectively
+(https://github.com/libarchive/libarchive/tree/v3.8.1/libarchive/test).
+Copyright the libarchive contributors, under libarchive's BSD licence;
+see build/agentry-files/archives/LICENSE. ZIP and TAR fixtures are ours.

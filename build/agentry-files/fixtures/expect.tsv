@@ -12,3 +12,6 @@ whiteboard.png	tesseract	FOR ALARMED REEFERS
 scan.tif	tesseract	FOR ALARMED REEFERS
 photo.jpg	tesseract	FOR ALARMED REEFERS
 sign.webp	tesseract	FOR ALARMED REEFERS
+policy.docx	tika-text	45-minute break
+policy.docx	tika-xml	45-minute break
+policy.docx	tika-detect	application/vnd.openxmlformats-officedocument.wordprocessingml.document
