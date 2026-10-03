@@ -108,7 +108,9 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Build this architecture
-        run: ./scripts/build.sh agentry-files
+        run: |
+          ./scripts/build.sh agentry-files
+          docker image inspect "ghcr.io/blaktron/agentry-files:$IMAGE_TAG-${PLATFORM##*/}" --format 'image size: {{.Size}} bytes'
 
       - name: Decode every fixture inside it, with no network
         run: ./scripts/check.sh --files-image "ghcr.io/blaktron/agentry-files:$IMAGE_TAG-${PLATFORM##*/}"
@@ -188,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-files\tghcr.io/blaktron/agentry-files:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the files image: the decoders of the runner's decode step (pandoc, pdftotext, tesseract), amd64 and arm64, signed keyless by the files workflow (agentry-cli images.files)")
+            "the files image: the decoders of the runner's decode step (pandoc, pdftotext, tesseract, Tika, libarchive, libmagic), amd64 and arm64, signed keyless by the files workflow (agentry-cli images.files)")
           {
             echo "### agentry-files:$IMAGE_TAG"
             echo
