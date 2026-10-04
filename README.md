@@ -17,7 +17,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
-| `agentry-files:2026.10.02.1` | `alpine:3.22` + `build/agentry-files/` | build | the decoders of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
+| `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -322,6 +322,14 @@ M3's build is `agentry-files:2026.10.03.2@sha256:ee6b4f66fa2f30444cf9ffbac4acb83
 (run 37152810514, 2026-10-03). Both native architectures passed all fixture
 checks, and the joined digest passed again before keyless signing and
 verification. Tika is 3.3.2, Java 17.0.19, libarchive 3.8.3, libmagic 5.46.
+
+M5's build is `agentry-files:2026.10.04.3@sha256:f8da034b365cd86c1498b041e87ee06faeb4264dfc6e25bd9c0d3013cf58a306`
+(run 37244194037, 2026-10-04): amd64 `97a407f5…` and arm64 `90cc605e…`. Each
+architecture, then the joined digest, passed every check, clamscan 1.4.3
+included (the EICAR file and its zip found, the eight fixtures clean). The
+signature verified from the workstation and an anonymous manifest fetch
+answered 200. The native images report 705,495,677 bytes (amd64) and
+710,570,308 (arm64).
 
 The `agentry-files` row in `images.tsv` then takes the tag and its digest, and
 the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
