@@ -94,8 +94,9 @@ own binary, under that repository's licence. This repository changes where their
 Apache Tika 3.3.2 (https://tika.apache.org), distributed unchanged as its
 SHA-512-pinned tika-app jar, is Apache-2.0. Its LICENSE and NOTICE, including
 its dependencies' notices, are preserved in the jar's META-INF directory.
-OpenJDK, libarchive and libmagic are installed from Alpine with their own
-package licences. The wrapper we add is ours, under MIT.
+OpenJDK, libarchive, libmagic and ClamAV (clamav-scanner, clamav-libunrar
+and their dependency freshclam, GPL-2.0-only as Alpine packages them) are
+installed from Alpine with their own package licences. The wrapper we add is ours, under MIT.
 
 The sample RAR and 7z fixtures in build/agentry-files/archives are decoded
 from libarchive v3.8.1's test_read_format_rar.rar.uu and
@@ -103,3 +104,9 @@ test_read_format_7zip_copy.7z.uu, respectively
 (https://github.com/libarchive/libarchive/tree/v3.8.1/libarchive/test).
 Copyright the libarchive contributors, under libarchive's BSD licence;
 see build/agentry-files/archives/LICENSE. ZIP and TAR fixtures are ours.
+
+## agentry-clamav-db
+
+The signature databases the clamav-db workflow publishes are Cisco Talos's
+ClamAV databases (main.cvd, daily.cvd, bytecode.cvd), passed on unmodified.
+Each carries its licence, the GNU GPL version 2, as COPYING inside it.

@@ -1,0 +1,191 @@
+# Fetch, check, sign and publish the ClamAV signature bundle, daily, to
+# ghcr.io/blaktron/agentry-clamav-db (agentry-notes plans/file-handling.md §7,
+# D15; agentry-dockerimages#30).
+#
+# The runner's decode step checks every input with clamscan inside the files
+# image, which has no network, so its signatures come from outside: this
+# bundle, which the CLI refreshes when its copy is over 24 hours old, verifies
+# against this workflow's keyless signature, and mounts read-only into the
+# decode container (agentry-cli#563). Past 7 days without a newer bundle, runs
+# go on and the receipt says the signatures are stale (D15).
+#
+# Each run fetches Cisco Talos's databases with freshclam into an empty
+# directory (main.cvd, daily.cvd and bytecode.cvd, each a signed CVD that
+# clamscan checks again when it loads it), checks them with the files image
+# images.tsv pins (the EICAR file and a zip of it found, every fixture clean,
+# with no network), and pushes the three files as one OCI artifact, one layer
+# a file, so a client re-downloads only the layers that changed. The tag is
+# the UTC date and run number and refuses one that exists. The pushed digest
+# is signed with cosign, keyless, as this workflow on main, and verified;
+# only then does `latest` move to it, so `latest` never names an unsigned
+# bundle. The package is public (a package a workflow of this public
+# repository creates is), so the CLI pulls it with no credential; the run
+# proves that with an anonymous manifest fetch.
+#
+# Scheduled daily, and dispatched by hand from main only. A schedule runs on
+# the default branch, main. GitHub disables a public repository's schedules
+# after 60 days without activity; a bundle older than 7 days is in every
+# receipt, which is how that would be noticed.
+name: clamav-db
+
+on:
+  schedule:
+    # 07:17 UTC: off the hour, after Talos's early daily.cvd builds.
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash with -eo pipefail, so a `| tee` never hides a failure.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: clamav-db
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      # cosign's keyless signature: the workflow's OIDC identity is the
+      # signing identity the CLI verifies the bundle against.
+      id-token: write
+    env:
+      REPO: ghcr.io/blaktron/agentry-clamav-db
+      IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/clamav-db.yaml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Refuse any branch but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::run this workflow from main; it pushes and signs a public bundle"
+          exit 1
+
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
+
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
+
+      # Anonymous, like every step before the push: freshclam and the check
+      # run before this job holds a registry login.
+      - name: Choose the tag, the UTC date and the run number, and refuse one that exists
+        run: |
+          set -euo pipefail
+          tag="$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          if oras manifest fetch "$REPO:$tag" >/dev/null 2>&1; then
+            echo "::error::$REPO:$tag exists; a new bundle is a new tag"
+            exit 1
+          fi
+          echo "TAG=$tag" >>"$GITHUB_ENV"
+
+      # freshclam from Alpine 3.22, the files image's own base and ClamAV
+      # version, run from our mirror of that base, into an empty directory.
+      - name: Fetch the signature databases with freshclam
+        run: |
+          set -euo pipefail
+          alpine=$(awk -F'\t' '$1 == "agentry-alpine" { print $2 "@" $3 }' images.tsv)
+          [ -n "$alpine" ] || { echo "::error::no agentry-alpine row in images.tsv"; exit 1; }
+          mkdir db
+          chmod 777 db
+          docker run --rm -v "$PWD/db:/db" "$alpine" sh -euc '
+            for try in 1 2 3 4 5; do apk add -q --no-cache freshclam && break; [ "$try" = 5 ] && exit 1; sleep 30; done
+            printf "DatabaseDirectory /db\nDatabaseMirror database.clamav.net\nDNSDatabaseInfo current.cvd.clamav.net\nForeground yes\n" >/tmp/freshclam.conf
+            freshclam --config-file=/tmp/freshclam.conf --stdout
+          '
+          sudo chown -R "$(id -u):$(id -g)" db
+          rm -f db/freshclam.dat
+          for f in main.cvd daily.cvd bytecode.cvd; do
+            [ -s "db/$f" ] || { echo "::error::freshclam wrote no $f"; exit 1; }
+          done
+          extra=$(find db -mindepth 1 ! -name main.cvd ! -name daily.cvd ! -name bytecode.cvd)
+          [ -z "$extra" ] || { echo "::error::freshclam wrote more than the three databases: $extra"; exit 1; }
+          # A CVD's header, its first 512 bytes, names its build time and
+          # version: ClamAV-VDB:<time>:<version>:<signatures>:<level>:...
+          for f in main.cvd daily.cvd bytecode.cvd; do
+            echo "$f: $(head -c 512 "db/$f" | tr -d '\0' | cut -d: -f1-5) ($(wc -c <"db/$f") bytes)"
+          done
+
+      - name: Check the databases with the pinned files image, with no network
+        run: |
+          set -euo pipefail
+          files=$(awk -F'\t' '$1 == "agentry-files" { print $2 "@" $3 }' images.tsv)
+          [ -n "$files" ] || { echo "::error::no agentry-files row in images.tsv"; exit 1; }
+          ./scripts/check.sh --clamav-db db "$files"
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Push the three databases as one artifact and record its digest
+        run: |
+          set -euo pipefail
+          cd db
+          oras push "$REPO:$TAG" --format json \
+            --artifact-type application/vnd.blaktron.agentry.clamav-db.v1 \
+            --annotation "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --annotation "org.opencontainers.image.description=ClamAV signature databases for the Agentry runner's decode step" \
+            main.cvd:application/vnd.clamav.cvd daily.cvd:application/vnd.clamav.cvd bytecode.cvd:application/vnd.clamav.cvd \
+            | tee ../push.json
+          digest=$(jq -r .digest ../push.json)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest from the push"; exit 1; }
+          echo "DIGEST=$digest" >>"$GITHUB_ENV"
+          echo "pushed $REPO:$TAG as $digest"
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign the pushed digest, keyless
+        run: cosign sign --yes "$REPO@$DIGEST"
+
+      - name: Verify the signature against this workflow's identity
+        run: |
+          cosign verify "$REPO@$DIGEST" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" >/dev/null
+          echo "verified $DIGEST as $IDENTITY"
+
+      - name: Move latest to the signed digest
+        run: oras tag "$REPO@$DIGEST" latest
+
+      - name: Fetch latest with no credential, as the CLI does
+        run: |
+          set -euo pipefail
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:blaktron/agentry-clamav-db:pull" | jq -r .token)
+          got=$(curl -fsS -o /dev/null -w '%header{docker-content-digest}' \
+            -H "Authorization: Bearer $token" -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+            "https://ghcr.io/v2/blaktron/agentry-clamav-db/manifests/latest")
+          if [ "$got" != "$DIGEST" ]; then
+            echo "::error::an anonymous fetch of latest answered ${got:-nothing}, not $DIGEST (is the package public?)"
+            exit 1
+          fi
+          echo "anonymous fetch of latest: $got"
+
+      - name: Write the bundle and its signing identity to the run's summary
+        run: |
+          {
+            echo "### agentry-clamav-db:$TAG"
+            echo
+            echo "\`$REPO@$DIGEST\`, now \`latest\`"
+            echo
+            echo '```'
+            for f in main.cvd daily.cvd bytecode.cvd; do
+              echo "$f: $(head -c 512 "db/$f" | tr -d '\0' | cut -d: -f1-5)"
+            done
+            echo '```'
+            echo
+            echo "Signed keyless; verify with:"
+            echo
+            echo '```'
+            echo "cosign verify $REPO@$DIGEST --certificate-identity $IDENTITY --certificate-oidc-issuer $ISSUER"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

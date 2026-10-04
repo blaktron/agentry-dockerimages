@@ -45,10 +45,21 @@
 #       (plan file-handling.md §4; agentry-dockerimages#28), as the invoking
 #       uid with the decode container's environment and limits. It prints the
 #       package record and fails on any setuid or setgid file. PLATFORM
-#       (e.g. linux/arm64) asks for, and checks, one architecture.
+#       (e.g. linux/arm64) asks for, and checks, one architecture. It also
+#       runs clamscan, with the argv the decode role uses, against a one-line
+#       signature database made here (the EICAR test file's MD5), and fails
+#       unless the EICAR file and a zip of it are found and every fixture is
+#       clean (agentry-dockerimages#30).
+#   scripts/check.sh --clamav-db <dir> <files-ref>
+#       the same clamscan check with a real signature database: the
+#       databases freshclam wrote to <dir> (the clamav-db workflow's), read
+#       by the files image <files-ref> with no network. It fails unless the
+#       EICAR file and its zip are found and every fixture is clean, so a
+#       bundle that finds nothing, or flags our own fixtures, is never
+#       published.
 #
-# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image and
-# --files-image need a container runtime instead (--files-image one that takes
+# Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image,
+# --files-image and --clamav-db need a container runtime instead (--files-image one that takes
 # docker's run flags for the decode container's hardening).
 set -euo pipefail
 
@@ -247,6 +258,9 @@ filesImage() {
 	done
 	echo "packages:"
 	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/files/packages | sed 's/^/  /'
+	mkdir "$out/clamav"
+	clamCheckDB "$out/clamav"
+	clamScan "$ref" "$out/clamav" || bad=1
 	# The scan runs as root (the image's owner, still with no capability) so
 	# no directory is unreadable to it, and a scan that could not finish fails.
 	local suid f
@@ -284,6 +298,71 @@ filesImage() {
 		bad=1
 	}
 	return "$bad"
+}
+
+# eicar writes the EICAR anti-virus test file, assembled from two halves so
+# this script is not itself the test file to a scanner.
+eicar() {
+	# shellcheck disable=SC2016 # the test file's own $ characters
+	printf '%s%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STAN' 'DARD-ANTIVIRUS-TEST-FILE!$H+H*' >"$1"
+}
+
+# clamScan runs clamscan inside the files image over the EICAR file, a zip of
+# it and every fixture, with the argv agentry-cli's decode role uses
+# (runnerimage/decode, clamscanArgv) and the decode container's hardening,
+# against the signature database in $2. It fails unless both EICAR files are
+# found, every fixture is clean, and clamscan exits 1 (something found).
+clamScan() {
+	local ref="$1" db="$2" runtime="${CONTAINER:-docker}" scan f name line code bad=0
+	scan=$(mktemp -d)
+	eicar "$scan/eicar.com"
+	python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1], "w").write(sys.argv[2], "eicar.com")' "$scan/eicar.zip" "$scan/eicar.com"
+	cp "$FILES_CTX"/fixtures/* "$scan/"
+	rm -f "$scan/expect.tsv"
+	chmod -R a+rX "$scan"
+	for f in "$scan"/*; do echo "/scan/${f##*/}"; done >"$scan.list"
+	mv "$scan.list" "$scan/list"
+	local run=("$runtime" run --rm --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--user "$(id -u):$(id -g)" --tmpfs /tmp:size=512m --pids-limit 256 --memory 2g
+		--env PATH=/usr/bin:/bin --env HOME=/tmp --env LC_ALL=C.UTF-8
+		-v "$db:/clamav:ro" -v "$scan:/scan:ro")
+	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
+	echo "clamscan: $("${run[@]}" --entrypoint /usr/bin/clamscan "$ref" --version --database=/clamav)"
+	code=0
+	"${run[@]}" --entrypoint /usr/bin/clamscan "$ref" --database=/clamav --tempdir=/tmp \
+		--no-summary --stdout --detect-pua=no --alert-exceeds-max=yes \
+		--max-filesize=512M --max-scansize=512M --file-list=/scan/list >"$scan.out" 2>"$scan.err" || code=$?
+	for f in "$scan"/*; do
+		name="${f##*/}"
+		[ "$name" = list ] && continue
+		line=$({ grep -F -- "/scan/$name: " "$scan.out" || true; } | head -1)
+		case "$name:${line##*: }" in
+		eicar.com:*" FOUND" | eicar.zip:*" FOUND") echo "ok   clamscan finds $name (${line##*: })" ;;
+		eicar.*) echo "FAIL clamscan did not find $name: ${line:-no line}" && bad=1 ;;
+		*:OK) echo "ok   clamscan passes $name" ;;
+		*) echo "FAIL clamscan on fixture $name: ${line:-no line}" && bad=1 ;;
+		esac
+	done
+	if [ "$code" -ne 1 ]; then
+		echo "FAIL clamscan exited $code, not 1 (found):"
+		sed 's/^/     /' "$scan.err" | tail -5
+		bad=1
+	fi
+	rm -rf "$scan" "$scan.out" "$scan.err"
+	return "$bad"
+}
+
+# clamCheckDB is the files image's own ClamAV check: a database of one
+# signature, the EICAR file's MD5 and size (ClamAV's .hdb format), so the
+# scanner is proven with no download.
+clamCheckDB() {
+	local db="$1" sum
+	eicar "$db/eicar"
+	sum=$(md5sum "$db/eicar" | cut -d' ' -f1)
+	printf '%s:%s:Agentry.Check.EICAR\n' "$sum" "$(wc -c <"$db/eicar" | tr -d ' ')" >"$db/check.hdb"
+	rm -f "$db/eicar"
+	chmod -R a+rX "$db"
 }
 
 # unsafeImage reads the three files out of the image, resolves each fixture
@@ -444,9 +523,16 @@ case "${1:-}" in
 	}
 	filesImage "$2"
 	;;
+--clamav-db)
+	[ $# -eq 3 ] && [ -d "$2" ] || {
+		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
+		exit 2
+	}
+	clamScan "$3" "$(cd "$2" && pwd)"
+	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
