@@ -12,7 +12,8 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-docker-agent:1.128.0` | `docker/docker-agent:1.128.0` | mirror | the default agent harness |
 | `agentry-golang-alpine:1.27-alpine` | `golang:1.27-alpine` | mirror | builds the runner image |
 | `agentry-alpine:3.22` | `alpine:3.22` | mirror | the runner image's runtime base |
-| `agentry-node-alpine:22-alpine` | `node:22-alpine` | mirror | installs and runs declared npm MCP servers |
+| `agentry-node-alpine:24-alpine` | `node:24-alpine` | mirror | installs and runs declared npm MCP servers (the CLI's default since agentry-cli#608) |
+| `agentry-node-alpine:22-alpine` | `node:22-alpine` | mirror | the same, for CLIs released before agentry-cli#608 and policies that pin it |
 | `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
@@ -117,7 +118,7 @@ images:
   gateway: ghcr.io/blaktron/agentry-mcp-gateway:v0.43.3
   harnessDockerAgent: ghcr.io/blaktron/agentry-docker-agent:1.128.0
   goBuilder: ghcr.io/blaktron/agentry-golang-alpine:1.27-alpine
-  nodeRuntime: ghcr.io/blaktron/agentry-node-alpine:22-alpine
+  nodeRuntime: ghcr.io/blaktron/agentry-node-alpine:24-alpine
   pythonRuntime: ghcr.io/blaktron/agentry-python-alpine:3.12-alpine
 ```
 
