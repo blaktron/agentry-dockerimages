@@ -524,10 +524,10 @@ case "${1:-}" in
 	filesImage "$2"
 	;;
 --clamav-db)
-	[ $# -eq 3 ] && [ -d "$2" ] || {
+	if [ $# -ne 3 ] || [ ! -d "$2" ]; then
 		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
 		exit 2
-	}
+	fi
 	clamScan "$3" "$(cd "$2" && pwd)"
 	;;
 '') runAll ;;
