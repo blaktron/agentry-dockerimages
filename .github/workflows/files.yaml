@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-files\tghcr.io/blaktron/agentry-files:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the files image: the decoders of the runner's decode step (pandoc, pdftotext, tesseract, Tika, libarchive, libmagic), amd64 and arm64, signed keyless by the files workflow (agentry-cli images.files)")
+            "the files image: the decoders of the runner's decode step (pandoc, pdftotext, tesseract, Tika, libarchive, libmagic) and its malware check (clamscan), amd64 and arm64, signed keyless by the files workflow (agentry-cli images.files)")
           {
             echo "### agentry-files:$IMAGE_TAG"
             echo

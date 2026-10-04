@@ -137,7 +137,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network ([below](#the-files-image)). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -256,6 +256,7 @@ D3, D4; agentry-dockerimages#28):
 | Apache Tika 3.3.2, `openjdk17-jre-headless` | the long tail, detection by content | `tika-app --detect`, `--text`, `--xml` |
 | `libarchive-tools` | ZIP, TAR, 7z, RAR and other archives | `bsdtar` |
 | `file` (libmagic) | fast content detection | `file --mime-type` |
+| `clamav-scanner`, `clamav-libunrar` | the malware check of every input and archive member | `clamscan` |
 
 It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
 those packages and their dependencies (libraries and data; no setuid or
@@ -283,7 +284,10 @@ network, every capability dropped, a read-only root, a 512 MiB `/tmp` and the
 role's environment. It asserts the phrase `expect.tsv` names for each, and
 fails on any setuid or setgid file in the image. Tika detects the DOCX's
 content type and extracts its phrase as text and XHTML. Real ZIP, TAR, 7z
-and RAR fixtures are listed by bsdtar under the same containment.
+and RAR fixtures are listed by bsdtar under the same containment. clamscan
+runs with the decode role's argv against a one-line signature database the
+check makes (the EICAR test file's MD5, ClamAV's `.hdb` format), and must
+find the EICAR file and a zip of it and pass every fixture.
 
 **Publishing and signing.** The `files` workflow (manual dispatch, from
 `main` only):
@@ -324,7 +328,53 @@ the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
 the pinned digest, and the sandbox hosts run it when they pre-pull the image
 (the CLI itself pulls by digest only). A rebuild is a new tag and a new digest, never an
 overwrite. M3 adds Apache Tika and libarchive (agentry-dockerimages#29). M5 adds
-ClamAV (agentry-dockerimages#30).
+ClamAV (agentry-dockerimages#30): `clamscan`, with no daemon and no signature
+database ([below](#the-clamav-signature-bundle)). Alpine's `clamav-scanner`
+depends on `freshclam`, so it is installed too, but nothing runs it: the decode
+container has no network, and the CLI's decode image is minimized to its
+catalogue's commands, which removes it.
+
+## The ClamAV signature bundle
+
+The decode container has no network, so clamscan's signatures come from
+outside: `ghcr.io/blaktron/agentry-clamav-db`, which the `clamav-db` workflow
+publishes every day (agentry-notes `plans/file-handling.md` §7, D15;
+agentry-dockerimages#30). The CLI refreshes its copy when it is over 24 hours
+old, verifies the signature below, and mounts the databases read-only into
+the decode container (agentry-cli#563). Past 7 days without a newer bundle,
+runs go on and the receipt says the signatures are stale.
+
+The workflow (daily at 07:17 UTC, or dispatched by hand, from `main` only):
+- runs `freshclam` from our mirror of `alpine:3.22` (the files image's own
+  base and ClamAV version) into an empty directory, and keeps exactly
+  `main.cvd`, `daily.cvd` and `bytecode.cvd`, Cisco Talos's signed CVDs,
+  which clamscan checks again as it loads them;
+- checks them with the files image `images.tsv` pins, with no network
+  (`scripts/check.sh --clamav-db`): the EICAR file and its zip found, every
+  fixture clean;
+- pushes the three files as one OCI artifact (artifact type
+  `application/vnd.blaktron.agentry.clamav-db.v1`, one layer a file, media
+  type `application/vnd.clamav.cvd`, named by `org.opencontainers.image.title`),
+  tagged with the UTC date and run number and refusing a tag that exists, so
+  a client downloads only the layers that changed (`main.cvd`, about 89 MB,
+  changes a few times a year; `daily.cvd`, about 23 MB, every day);
+- signs the pushed digest with cosign, keyless, as the workflow itself,
+  verifies it, and only then moves `latest` to it, so `latest` never names an
+  unsigned bundle; then fetches `latest` with no credential, as the CLI does.
+
+The bundle has no row in `images.tsv`: it is not pinned, by design, since a
+pin would hold every machine to one day's signatures. Its trust is the
+signature. Verify one with:
+
+```
+cosign verify ghcr.io/blaktron/agentry-clamav-db@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/clamav-db.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The signature databases are Cisco Talos's. Each CVD carries its licence, the
+GNU GPL version 2, as `COPYING` inside it, and the bundle passes each CVD on
+unmodified.
 
 ## Building Docker Agent from source
 
