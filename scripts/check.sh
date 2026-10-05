@@ -309,7 +309,9 @@ eicar() {
 
 # clamScan runs clamscan inside the files image over the EICAR file, a zip of
 # it and every fixture, with the argv agentry-cli's decode role uses
-# (runnerimage/decode, clamscanArgv) and the decode container's hardening,
+# (runnerimage/decode, clamscanArgv: both bounds 256M, half the decode's
+# 512 MiB /tmp, since clamscan inflates what it extracts there up to the file
+# bound) and the decode container's hardening,
 # against the signature database in $2. It fails unless both EICAR files are
 # found, every fixture is clean, and clamscan exits 1 (something found).
 clamScan() {
@@ -332,7 +334,7 @@ clamScan() {
 	code=0
 	"${run[@]}" --entrypoint /usr/bin/clamscan "$ref" --database=/clamav --tempdir=/tmp \
 		--no-summary --stdout --detect-pua=no --alert-exceeds-max=yes \
-		--max-filesize=512M --max-scansize=512M --file-list=/scan/list >"$scan.out" 2>"$scan.err" || code=$?
+		--max-filesize=256M --max-scansize=256M --file-list=/scan/list >"$scan.out" 2>"$scan.err" || code=$?
 	for f in "$scan"/*; do
 		name="${f##*/}"
 		[ "$name" = list ] && continue
