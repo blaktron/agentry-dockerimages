@@ -25,6 +25,8 @@ Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-harness-golang:1.27.0-alpine3.23` (`golang:1.27.0-alpine3.23`).
 One more is needed only to build `agentry-unsafe-kali`:
 `agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
+And one only to build `agentry-typst`: `agentry-rust-alpine:1.98.1-alpine3.22`
+(`rust:1.98.1-alpine3.22`).
 
 `images.tsv` is the manifest: one tab-separated row per image, with our
 name, the upstream ref, the upstream digest, the kind and the role. A `build`
@@ -107,6 +109,10 @@ workflow creates in this public repository is public:
   on, so it must need no login;
 - `agentry-kali-rolling`, its build-time base.
 
+The `typst` workflow likewise creates `agentry-typst`, which the runner image
+copies from and so must need no login, and its build-time base
+`agentry-rust-alpine`.
+
 ## Repointing the images
 
 The CLI's defaults are tags, not digests. An operator who wants their own
@@ -137,7 +143,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -153,7 +159,7 @@ pulls no image and needs no credentials.
 
 The `images` workflow runs the same steps, then mirrors every `mirror` row
 and builds every context in `build/` except those built per architecture,
-which have their own workflows (`unsafe-kali`, `files`). It is started by hand, and it
+which have their own workflows (`unsafe-kali`, `files`, `typst`). It is started by hand, and it
 logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
 secrets are set.
 
@@ -404,6 +410,134 @@ build host's platform only, while the mirror has linux/amd64 and linux/arm64.
 A build needs several GB of free disk. It replaces the mirror only after it
 passes the CLI's live runner acceptance tests; the `agentry-docker-agent` row
 in `images.tsv` then changes from `mirror` to `build`.
+
+## Building Typst from source
+
+`build/typst/` builds [Typst](https://github.com/typst/typst) `v0.15.1` at
+commit `9dfd3a08500b7896045f907433cf7b4b02434fad` (Apache-2.0;
+`source.env`). It is the PDF renderer of the runner's `export_pdf` (agentry-notes
+`plans/scratch-and-pdf-reports.md` §5, D23 to D27; agentry-dockerimages#48).
+The result, `agentry-typst`, holds only files, for agentry-cli's runner image
+to `COPY --from=ghcr.io/blaktron/agentry-typst@<digest>`:
+
+| Path | What |
+|---|---|
+| `/typst` | the static binary; also the entrypoint, so the checks can run the image |
+| `/fonts/` | the Noto set: Sans, Serif and Mono for Latin, Greek and Cyrillic; Arabic, Hebrew, Thai, Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Sinhala, Tamil, Telugu; Simplified Chinese and Korean; Symbols, Symbols 2, Math; Noto Color Emoji (COLRv1). All OFL-1.1 |
+| `/typst-packages/` | the `cmarker` package 0.1.10 (MIT), as Typst's local package directory (`preview/cmarker/0.1.10/`), for `--package-path` |
+| `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence and notice files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv` for crates that ship none), the OFL text of each font source, and `fetch.tsv` |
+
+Japanese text renders its kana from the Chinese font and its Han characters
+in Chinese forms, because no Japanese or Traditional Chinese font is bundled.
+A template's font list should put `Noto Color Emoji` straight after its
+text font. Typst takes each character from the first family in the list that
+has a glyph for it, and the CJK and symbol fonts also draw some emoji (⚠
+U+26A0, 🔒 U+1F512), in monochrome. Noto Sans covers the digits and marks
+that the emoji font also has, so those never fall through to it. The fixture
+template does this.
+
+The first local amd64 build on 2026-10-08 is 84,618,589 bytes of files: a
+40,204,288-byte binary (upstream's own release binary is 55.7 MB, with its
+downloader and embedded fonts), 45 font files (about 42 MB) and cmarker
+(340 KB).
+
+**Without its package downloader (D26).** Typst's cargo features cannot
+remove the downloader. typst-cli turns typst-kit's `system-downloader` (ureq,
+native-tls, OpenSSL) on unconditionally, and always builds the Universe
+package source, so an `@preview` import that is not in the package directory
+is fetched from `packages.typst.org`. Checked at v0.15.1, where the upstream
+binary under `--network none` sent a DNS query before failing. Its features
+cover only `embedded-fonts` and `http-server` (the defaults) and
+`self-update`. So:
+
+- the build uses `--no-default-features`: no HTTP server and no embedded
+  fonts, since the fonts are the bundled set;
+- `disable-package-downloads.patch` (the operator's decision, 2026-10-08):
+  - removes `system-downloader` and the `vendor-openssl` feature from
+    typst-cli;
+  - replaces its downloader with one that refuses every request with
+    "package downloads are disabled".
+
+  It touches two files, `crates/typst-cli/Cargo.toml` and
+  `crates/typst-cli/src/download.rs`.
+
+The patch is applied with no fuzz. The build fails if the binary's
+dependency list (`cargo tree`, normal dependencies) does not name typst-cli
+and typst-kit, or names a network client (the list is in the Dockerfile:
+ureq, native-tls, OpenSSL, rustls, hyper, reqwest, curl and others). It also
+fails if the binary needs a shared library or an interpreter. **Re-check the
+patch at every Typst tag bump.** It must still apply, the build's dependency
+check must pass, and `scripts/check.sh --typst-image` must still pass.
+
+**The fonts and the package** are fetched by `build/typst/fetch.sh` from the
+URLs in `build/typst/fetch.tsv`, each at a pinned commit. A file whose SHA-256
+differs fails the build. The sources:
+
+- the Noto project's published builds, `notofonts/notofonts.github.io`;
+- `notofonts/noto-cjk`, for the CJK region subsets;
+- `googlefonts/noto-emoji` at `v2.051`;
+- `typst/packages`, for cmarker.
+
+The licence column of `fetch.tsv` names each file's licence, and
+`licenses/fonts/` holds the OFL text of every font source repository.
+cmarker's own default for `raw-typst` is `true`. The runner's template must
+pass `raw-typst: false`, so the Markdown never injects Typst code; that is
+the template's job (agentry-cli, M3). The check's fixture template does the
+same.
+
+**The check.** `scripts/check.sh --typst-image <ref>` runs the image the way
+`export_pdf` will. The container has no network, every capability dropped, a
+read-only root and the invoking uid, with only the bundled fonts and
+packages (`--ignore-system-fonts --font-path /fonts --package-path
+/typst-packages`). The check:
+
+1. asserts that `typst fonts` lists every family in
+   `build/typst/fixtures/fonts.txt`;
+2. renders `build/typst/fixtures/report.typ` with `--pdf-standard ua-1` to a
+   PDF that must carry a structure tree and the PDF/UA identification. The
+   report is the 2026-10-08 prototype's sample: Chinese, Arabic RTL, Hindi,
+   emoji, a table, code, a local image, a long unbreakable token. It adds a
+   line each of Hebrew, Thai, Korean, Japanese, Bengali, Tamil, Telugu, Greek,
+   Cyrillic and symbols;
+3. renders the same report to PNG pages, which land in `$OUT_DIR` for a
+   person to look at;
+4. compiles `fixtures/import.typ`, which imports `@preview/whatever:0.1.0`.
+   It must fail with "package downloads are disabled";
+5. runs that import and the report again under `strace -e
+   trace=%network,execve`, in a helper built from our `agentry-alpine` mirror
+   with `strace`, `file` and the image's files. Building the helper needs
+   network; the traced runs have none. The check fails on any network system
+   call, if the traced import does not reach the refusing downloader, if the
+   traced report does not render, and unless `file` calls `/typst` static.
+   Against the upstream binary, the same trace shows its DNS query to port 53.
+
+**Publishing and signing.** The `typst` workflow publishes the image as the
+`files` workflow publishes `agentry-files` (manual dispatch, from `main`
+only). Its `prepare` job also mirrors the builder base, `agentry-rust-alpine`
+(`rust:1.98.1-alpine3.22` by digest), so a workflow creates that package and
+it is public. The workflow:
+
+- builds amd64 and arm64 natively;
+- runs the check on each before pushing it, and keeps the PDF and PNG pages
+  as a run artifact;
+- joins the pushed digests into one tag named for the UTC date and the run
+  number;
+- checks that digest again, then signs it with cosign, keyless, and
+  verifies the signature.
+
+Verify a published digest with:
+
+```
+cosign verify ghcr.io/blaktron/agentry-typst@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/typst.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+`scripts/build.sh` passes an upstream context's own directory to the build as
+the named context `agentry`. That is how the patch, `fetch.tsv` and
+`fetch.sh` reach the Dockerfile without being mixed into Typst's tree. A
+local build needs several GB of disk; on 2026-10-08 the release build took
+12 minutes on the 8-core workstation.
 
 ## Licence
 

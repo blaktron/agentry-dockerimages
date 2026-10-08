@@ -41,6 +41,48 @@ Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
 upstream component.
 
+### Typst
+
+    Upstream:   https://github.com/typst/typst
+    Commit:     9dfd3a08500b7896045f907433cf7b4b02434fad  (tag v0.15.1)
+    Licence:    Apache-2.0
+    Our image:  agentry-typst
+    Context:    build/typst/
+
+Copyright the Typst project developers. Licensed under the Apache License,
+Version 2.0. Upstream's `LICENSE` and `NOTICE` (its third-party notices) are
+shipped in the image under `/licenses/typst/`. The Rust crates statically linked
+into the binary keep their own licences (mostly MIT or Apache-2.0); the
+build copies each registry crate's licence and notice files into
+`/licenses/crates/`, lists every crate with its declared licence in
+`crates.tsv`, and names in `no-licence-file.tsv` any crate that ships none.
+
+**Changes we make** (Apache-2.0 §4(b)). `build/typst/disable-package-downloads.patch`
+modifies two files, and it is shipped in the image beside the licence:
+
+1. `crates/typst-cli/Cargo.toml`: typst-kit's `system-downloader` feature
+   (ureq, native-tls, OpenSSL) and the `vendor-openssl` feature are removed.
+2. `crates/typst-cli/src/download.rs`: the downloader is replaced by one that
+   refuses every request with "package downloads are disabled", so a package
+   the local package directory cannot serve is never fetched.
+
+The build also uses `--no-default-features` (no HTTP server, no embedded
+fonts) and bases from our mirrors. Nothing built here is a Typst product; the
+name identifies the upstream component.
+
+**Bundled with it**, each fetched at a pinned commit and held to its SHA-256
+(`build/typst/fetch.tsv`, shipped as `/licenses/fetch.tsv`):
+
+- the Noto fonts, from `notofonts/notofonts.github.io`, `notofonts/noto-cjk`
+  and `googlefonts/noto-emoji`: SIL Open Font License 1.1, its text from each
+  source repository under `/licenses/fonts/`. They are redistributed
+  unmodified and are not sold alone. "Noto" is a trademark of Google LLC, used
+  only to identify the fonts.
+- `cmarker` 0.1.10 (Sabrina Jewson), from `typst/packages`: MIT, its
+  `LICENSE` beside it in `/typst-packages/preview/cmarker/0.1.10/`. It includes
+  the author's WebAssembly build of its Markdown parser (`plugin.wasm`),
+  unmodified.
+
 ### agentry-unsafe-kali
 
     Base:       kalilinux/kali-rolling, by digest (images.tsv, agentry-kali-rolling)
@@ -76,6 +118,7 @@ naming them — see each upstream repository.
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
+| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 
 "See upstream" means this repository has not audited the full dependency licence
 set of that image, and does not claim to. Mirroring preserves whatever terms the
