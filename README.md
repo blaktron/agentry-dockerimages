@@ -18,6 +18,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
+| `agentry-typst:2026.10.08.1` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -436,10 +437,19 @@ U+26A0, 🔒 U+1F512), in monochrome. Noto Sans covers the digits and marks
 that the emoji font also has, so those never fall through to it. The fixture
 template does this.
 
-The first local amd64 build on 2026-10-08 is 84,618,589 bytes of files: a
-40,204,288-byte binary (upstream's own release binary is 55.7 MB, with its
-downloader and embedded fonts), 45 font files (about 42 MB) and cmarker
-(340 KB).
+The first local amd64 build on 2026-10-08 held a 40,204,288-byte binary.
+Upstream's own release binary is 55.7 MB, with its downloader and embedded
+fonts. The rest is 45 font files (about 42 MB) and cmarker (340 KB). The
+published images report 87,356,748 bytes (amd64) and 81,437,396 (arm64).
+
+The first build is `ghcr.io/blaktron/agentry-typst:2026.10.08.1@sha256:37eb0ef5b52af3abd4635f249fa06e6aab4a13626abda482d40bdfe9a38828b9`
+(run 37784329814, 2026-10-08): amd64 `d0fe82c2…` and arm64 `027b84c3…`.
+Each architecture, then the joined digest, passed every `--typst-image`
+check. arm64's binary is statically linked; amd64's is static-pie. 311 crates
+are linked into the binary, and 12 of them ship no licence file. The run's
+amd64 PNG pages are byte-identical to the local build's. The signature
+verified from the workstation, and an anonymous manifest fetch of
+`agentry-typst` and `agentry-rust-alpine` answered 200 the same day.
 
 **Without its package downloader (D26).** Typst's cargo features cannot
 remove the downloader. typst-cli turns typst-kit's `system-downloader` (ureq,
