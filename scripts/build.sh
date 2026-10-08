@@ -10,8 +10,10 @@
 #
 # A context's source.env says what it builds:
 #   UPSTREAM_REPO, UPSTREAM_COMMIT, UPSTREAM_TAG   an upstream repository to
-#       clone at a pinned commit (build/docker-agent/); without them the
-#       context directory itself is the build context (build/agentry-unsafe-kali/)
+#       clone at a pinned commit (build/docker-agent/, build/typst/), with the
+#       context directory passed as the named build context `agentry`;
+#       without them the context directory itself is the build context
+#       (build/agentry-unsafe-kali/)
 #   IMAGE_NAME, IMAGE_TAG   the image; IMAGE_TAG from the environment wins
 #   PLATFORMS               the architectures a multi-platform image is built
 #       for, each natively, one per run with PLATFORM set; --merge then joins
@@ -199,6 +201,10 @@ if [ -n "$UPSTREAM_REPO" ]; then
 	git -C "$work/src" checkout -q FETCH_HEAD
 	cp "$ctx/Dockerfile" "$work/src/Dockerfile"
 	buildargs+=(--build-arg GIT_TAG="$UPSTREAM_TAG" --build-arg GIT_COMMIT="$UPSTREAM_COMMIT")
+	# The context's own files (a patch, a fetch list) reach the build as the
+	# named context `agentry`, kept apart from the upstream tree
+	# (build/typst/); a Dockerfile that does not name it ignores it.
+	buildargs+=(--build-context "agentry=$PWD/$ctx")
 else
 	echo "context $ctx"
 	cp -r "$ctx" "$work/src"

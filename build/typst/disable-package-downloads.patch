@@ -1,0 +1,104 @@
+--- a/crates/typst-cli/Cargo.toml
++++ b/crates/typst-cli/Cargo.toml
+@@ -65,7 +65,6 @@
+     "universe-packages",
+     "datetime",
+     "emit-diagnostics",
+-    "system-downloader",
+     "watcher",
+     "timer",
+ ]
+@@ -97,9 +96,6 @@
+ # Permits the CLI to update itself without a package manager.
+ self-update = ["dep:self-replace", "dep:xz2", "dep:zip"]
+ 
+-# Whether to vendor OpenSSL. Not applicable to Windows and macOS builds.
+-vendor-openssl = ["typst-kit/vendor-openssl"]
+-
+ [lints]
+ workspace = true
+ 
+--- a/crates/typst-cli/src/download.rs
++++ b/crates/typst-cli/src/download.rs
+@@ -1,63 +1,27 @@
+-use std::io::Write;
++use std::any::Any;
++use std::io::{self, Read};
+ 
+-use codespan_reporting::term;
+-use codespan_reporting::term::termcolor::WriteColor;
+-use ecow::{EcoString, eco_format};
+-use typst::syntax::package::PackageSpec;
+-use typst_kit::downloader::{
+-    Downloader, Progress, ProgressDownloader, ProgressReporter, SystemDownloader,
+-};
+-
+-use crate::ARGS;
+-use crate::terminal;
++use typst_kit::downloader::Downloader;
+ 
+ /// Returns a new downloader.
++///
++/// Agentry's build (agentry-dockerimages build/typst/) compiles out typst-kit's
++/// `system-downloader`, so no network client is linked into the binary, and
++/// returns a downloader that refuses every request instead: a package that is
++/// not in the package directory fails to load and is never fetched.
+ pub fn downloader() -> impl Downloader {
+-    let user_agent = format!("typst/{}", typst::utils::version().raw());
+-    let system = match ARGS.cert.clone() {
+-        None => SystemDownloader::new(user_agent),
+-        Some(cert) => SystemDownloader::with_cert_path(user_agent, cert),
+-    };
+-
+-    ProgressDownloader::new(system, |key| {
+-        let name = if let Some(spec) = key.downcast_ref::<PackageSpec>() {
+-            Some(eco_format!("{spec}"))
+-        } else if let Some(&s @ "release") = key.downcast_ref::<&str>() {
+-            Some(s.into())
+-        } else {
+-            None
+-        };
+-        PrintProgress(name)
+-    })
++    DisabledDownloader
+ }
+ 
+-/// Prints download progress by writing `downloading {0}` followed by repeatedly
+-/// updating the last terminal line.
+-struct PrintProgress(Option<EcoString>);
+-
+-impl ProgressReporter for PrintProgress {
+-    fn start(&mut self, progress: &Progress) {
+-        if let Some(name) = &self.0 {
+-            let styles = term::Styles::default();
+-            let mut out = terminal::out();
+-            _ = out.set_color(&styles.header_help);
+-            _ = write!(out, "downloading");
+-            _ = out.reset();
+-            _ = writeln!(out, " {name}");
+-            _ = writeln!(out);
+-        }
+-        self.update(progress);
+-    }
+-
+-    fn update(&mut self, progress: &Progress) {
+-        if self.0.is_some() {
+-            let mut out = terminal::out();
+-            _ = out.clear_last_line();
+-            _ = writeln!(out, "{progress}");
+-        }
+-    }
++/// A downloader that never touches the network.
++struct DisabledDownloader;
+ 
+-    fn finish(&mut self, progress: &Progress) {
+-        self.update(progress);
++impl Downloader for DisabledDownloader {
++    fn stream(
++        &self,
++        _key: &dyn Any,
++        _url: &str,
++    ) -> io::Result<(Option<usize>, Box<dyn Read>)> {
++        Err(io::Error::other("package downloads are disabled"))
+     }
+ }
