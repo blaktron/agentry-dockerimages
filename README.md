@@ -425,7 +425,7 @@ to `COPY --from=ghcr.io/blaktron/agentry-typst@<digest>`:
 | `/typst` | the static binary; also the entrypoint, so the checks can run the image |
 | `/fonts/` | the Noto set: Sans, Serif and Mono for Latin, Greek and Cyrillic; Arabic, Hebrew, Thai, Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Sinhala, Tamil, Telugu; Simplified Chinese and Korean; Symbols, Symbols 2, Math; Noto Color Emoji (COLRv1). All OFL-1.1 |
 | `/typst-packages/` | the `cmarker` package 0.1.10 (MIT), as Typst's local package directory (`preview/cmarker/0.1.10/`), for `--package-path` |
-| `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the OFL text of each font source, and `fetch.tsv` |
+| `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence and notice files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv` for crates that ship none), the OFL text of each font source, and `fetch.tsv` |
 
 Japanese text renders its kana from the Chinese font and its Han characters
 in Chinese forms, because no Japanese or Traditional Chinese font is bundled.
@@ -461,11 +461,13 @@ cover only `embedded-fonts` and `http-server` (the defaults) and
   It touches two files, `crates/typst-cli/Cargo.toml` and
   `crates/typst-cli/src/download.rs`.
 
-The build fails if `cargo tree` still lists ureq, native-tls, OpenSSL,
-env_proxy, tiny_http or self-replace, or if the binary has a dynamic section
-or an interpreter. **Re-check the patch at every Typst tag bump.** It must
-still apply, the build's dependency check must pass, and
-`scripts/check.sh --typst-image` must still pass.
+The patch is applied with no fuzz. The build fails if the binary's
+dependency list (`cargo tree`, normal dependencies) does not name typst-cli
+and typst-kit, or names a network client (the list is in the Dockerfile:
+ureq, native-tls, OpenSSL, rustls, hyper, reqwest, curl and others). It also
+fails if the binary needs a shared library or an interpreter. **Re-check the
+patch at every Typst tag bump.** It must still apply, the build's dependency
+check must pass, and `scripts/check.sh --typst-image` must still pass.
 
 **The fonts and the package** are fetched by `build/typst/fetch.sh` from the
 URLs in `build/typst/fetch.tsv`, each at a pinned commit. A file whose SHA-256
@@ -501,10 +503,13 @@ packages (`--ignore-system-fonts --font-path /fonts --package-path
    person to look at;
 4. compiles `fixtures/import.typ`, which imports `@preview/whatever:0.1.0`.
    It must fail with "package downloads are disabled";
-5. runs that import again under `strace -e trace=%network`, in a helper built
-   from our `agentry-alpine` mirror with `strace` and `file`. Building the
-   helper needs network. The check fails on any network system call, and
-   unless `file` calls `/typst` static.
+5. runs that import and the report again under `strace -e
+   trace=%network,execve`, in a helper built from our `agentry-alpine` mirror
+   with `strace`, `file` and the image's files. Building the helper needs
+   network; the traced runs have none. The check fails on any network system
+   call, if the traced import does not reach the refusing downloader, if the
+   traced report does not render, and unless `file` calls `/typst` static.
+   Against the upstream binary, the same trace shows its DNS query to port 53.
 
 **Publishing and signing.** The `typst` workflow publishes the image as the
 `files` workflow publishes `agentry-files` (manual dispatch, from `main`
@@ -531,7 +536,8 @@ cosign verify ghcr.io/blaktron/agentry-typst@<digest> \
 `scripts/build.sh` passes an upstream context's own directory to the build as
 the named context `agentry`. That is how the patch, `fetch.tsv` and
 `fetch.sh` reach the Dockerfile without being mixed into Typst's tree. A
-local build needs several GB of disk; the release build took 12 minutes on the 8-core workstation.
+local build needs several GB of disk; on 2026-10-08 the release build took
+12 minutes on the 8-core workstation.
 
 ## Licence
 

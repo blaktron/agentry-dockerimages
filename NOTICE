@@ -51,7 +51,11 @@ upstream component.
 
 Copyright the Typst project developers. Licensed under the Apache License,
 Version 2.0. Upstream's `LICENSE` and `NOTICE` (its third-party notices) are
-shipped in the image under `/licenses/typst/`.
+shipped in the image under `/licenses/typst/`. The Rust crates statically linked
+into the binary keep their own licences (mostly MIT or Apache-2.0); the
+build copies each registry crate's licence and notice files into
+`/licenses/crates/`, lists every crate with its declared licence in
+`crates.tsv`, and names in `no-licence-file.tsv` any crate that ships none.
 
 **Changes we make** (Apache-2.0 §4(b)). `build/typst/disable-package-downloads.patch`
 modifies two files, and it is shipped in the image beside the licence:

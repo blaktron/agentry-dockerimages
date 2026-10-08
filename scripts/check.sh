@@ -19,10 +19,11 @@
 #     fixture has no row, or a row names a decoder the image does not hold
 #     or no phrase
 #     (build/agentry-files);
-#   - the Typst image's fetch list has a row that is not four fields, names
-#     no pinned commit, has no SHA-256 or no known licence, or repeats a path;
-#     its patch is missing, empty or not named in source.env; or its font
-#     list is empty (build/typst).
+#   - the Typst image's fetch list has a row that is not four fields, lies
+#     outside fonts/, licenses/fonts/ and typst-packages/, names no pinned
+#     commit, has no SHA-256 or no known licence, or repeats a path; its
+#     patch is missing, empty, not applied by its Dockerfile or not named in
+#     source.env; or its font list names no family (build/typst).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image and --typst-image mode, which run the image they name.
@@ -77,8 +78,10 @@
 #       published.
 #
 # Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image,
-# --files-image and --clamav-db need a container runtime instead (--files-image one that takes
-# docker's run flags for the decode container's hardening).
+# --files-image, --typst-image and --clamav-db need a container runtime
+# instead (--files-image and --typst-image one that takes docker's run flags
+# for the hardening), and --typst-image also python3 and network to build its
+# strace helper.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -496,11 +499,14 @@ checkTypst() {
 	if [ ! -s "$TYPST_CTX/disable-package-downloads.patch" ]; then
 		echo "$TYPST_CTX/disable-package-downloads.patch: missing or empty"
 		bad=1
+	elif ! grep -q '^RUN patch .*disable-package-downloads\.patch' "$TYPST_CTX/Dockerfile"; then
+		echo "$TYPST_CTX/Dockerfile: does not apply disable-package-downloads.patch"
+		bad=1
 	elif ! grep -q 'disable-package-downloads\.patch' "$TYPST_CTX/source.env"; then
 		echo "$TYPST_CTX/source.env: does not name disable-package-downloads.patch"
 		bad=1
 	fi
-	if ! grep -qv '^#' "$TYPST_CTX/fixtures/fonts.txt"; then
+	if ! grep -qvE '^(#|[[:space:]]*$)' "$TYPST_CTX/fixtures/fonts.txt"; then
 		echo "$TYPST_CTX/fixtures/fonts.txt: no font family"
 		bad=1
 	fi
@@ -510,24 +516,27 @@ checkTypst() {
 # typstImage runs a built agentry-typst the way the runner's export_pdf will
 # (plan scratch-and-pdf-reports §5: no network, the invoking uid, every
 # capability dropped, a read-only root, a fixed argv with only the bundled
-# fonts and packages), over build/typst/fixtures/.
+# fonts and packages), over build/typst/fixtures/. Then it runs the import
+# probe and the report again under strace, in a helper holding the image's
+# files, so "no network call" is observed rather than only blocked.
 typstImage() {
-	local ref="$1" runtime="${CONTAINER:-docker}" out fam got bad=0 rc helper want
+	local ref="$1" runtime="${CONTAINER:-docker}" out fam got bad=0 rc want alpine
+	local helper="local/agentry-typst-check:$$"
 	checkTypst || return 1
 	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
 	out=$(mktemp -d)
-	# shellcheck disable=SC2064 # expand now: out is local
-	trap "rm -rf '$out'" EXIT
-	chmod 777 "$out"
+	# shellcheck disable=SC2064 # expand now: out and helper are local
+	trap "rm -rf '$out'; '$runtime' rmi -f '$helper' >/dev/null 2>&1 || true" EXIT
 	local run=("$runtime" run --rm --network none --cap-drop ALL
 		--security-opt no-new-privileges --security-opt label=disable --read-only
 		--user "$(id -u):$(id -g)" --tmpfs /tmp:size=256m --pids-limit 256 --memory 1g
 		-v "$PWD/$TYPST_CTX/fixtures:/in:ro" -v "$out:/out")
 	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
-	local typst=(--ignore-system-fonts --font-path /fonts --package-path /typst-packages)
+	local fonts=(--ignore-system-fonts --font-path /fonts)
+	local typst=("${fonts[@]}" --package-path /typst-packages)
 
 	echo "version: $("${run[@]}" "$ref" --version)"
-	got=$("${run[@]}" "$ref" fonts "${typst[@]:0:3}")
+	got=$("${run[@]}" "$ref" fonts "${fonts[@]}")
 	while IFS= read -r fam; do
 		case "$fam" in '' | \#*) continue ;; esac
 		if grep -qxF -- "$fam" <<<"$got"; then
@@ -587,48 +596,60 @@ EOF
 		bad=1
 	fi
 
-	# The same import under strace: not one network system call, so the
-	# refusal is the binary's own and no network block is needed for it.
-	local alpine
-	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print "ghcr.io/blaktron/agentry-alpine:3.22@" $3 }' "$MANIFEST")
-	helper="local/agentry-typst-check:$$"
+	# Under strace: the image's files in a helper from our alpine mirror with
+	# strace and file. Building it needs network; the traced runs have none.
+	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print $3 }' "$MANIFEST")
+	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.22@$alpine"
 	# shellcheck disable=SC2016 # ${TYPST} and ${ALPINE} are the Dockerfile's
-	if printf 'ARG TYPST\nARG ALPINE\nFROM ${TYPST} AS typst\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=typst /typst /typst\n' |
+	if ! printf 'ARG TYPST\nARG ALPINE\nFROM ${TYPST} AS typst\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=typst /typst /typst\nCOPY --from=typst /fonts /fonts\nCOPY --from=typst /typst-packages /typst-packages\n' |
 		"$runtime" build -q ${PLATFORM:+--platform "$PLATFORM"} --build-arg TYPST="$ref" --build-arg ALPINE="$alpine" -t "$helper" - >/dev/null; then
-		want=""
-		case "${PLATFORM:-}" in
-		*/amd64) want="x86-64" ;;
-		*/arm64) want="aarch64" ;;
-		esac
-		got=$("$runtime" run --rm --network none "$helper" file -b /typst)
-		echo "     file: $got"
-		if [[ "$got" == *"static"* ]] && [[ "$got" != *"dynamically"* ]] && [[ -z "$want" || "$got" == *"$want"* ]]; then
-			echo "ok   /typst is a static ${want:-binary}"
-		else
-			echo "FAIL /typst is not a static ${want:-binary}"
-			bad=1
-		fi
-		"$runtime" run --rm --network none --cap-add SYS_PTRACE --security-opt label=disable \
-			-v "$PWD/$TYPST_CTX/fixtures:/in:ro" "$helper" sh -c \
-			'strace -f -qq -e trace=%network,execve -o /tmp/trace /typst compile --root /in --ignore-system-fonts /in/import.typ /tmp/x.pdf >/dev/null 2>&1; cat /tmp/trace' >"$out/trace" || true
-		# execve is traced too, so an empty trace (strace not running) cannot
-		# pass for a clean one.
-		if ! grep -q 'execve("/typst"' "$out/trace"; then
-			echo "FAIL strace did not trace the import:"
-			sed 's/^/     /' "$out/trace" | head -8
-			bad=1
-		elif grep -v 'execve(' "$out/trace" | grep -q .; then
-			echo "FAIL the @preview import made network system calls:"
-			grep -v 'execve(' "$out/trace" | sed 's/^/     /' | head -8
-			bad=1
-		else
-			echo "ok   the @preview import made no network system call (strace -e trace=%network)"
-		fi
-		"$runtime" rmi -f "$helper" >/dev/null 2>&1 || true
-	else
 		echo "FAIL could not build the strace helper from $alpine"
+		return 1
+	fi
+	want=""
+	case "${PLATFORM:-}" in
+	*/amd64) want="x86-64" ;;
+	*/arm64) want="aarch64" ;;
+	esac
+	got=$("$runtime" run --rm --network none "$helper" file -b /typst) || got=""
+	echo "     file: $got"
+	if [[ "$got" == *"static"* ]] && [[ "$got" != *"dynamically"* ]] && [[ -z "$want" || "$got" == *"$want"* ]]; then
+		echo "ok   /typst is a static ${want:-binary}"
+	else
+		echo "FAIL /typst is not a static ${want:-binary}"
 		bad=1
 	fi
+	# Each traced run writes the trace, then typst's exit code and output. The
+	# trace holds execve too, so an empty trace (strace not running) cannot
+	# pass for a clean one.
+	local name doc trace
+	for name in import report; do
+		doc="/in/$name.typ"
+		"$runtime" run --rm --network none --cap-add SYS_PTRACE --security-opt label=disable \
+			-v "$PWD/$TYPST_CTX/fixtures:/in:ro" "$helper" sh -c \
+			'strace -f -qq -e trace=%network,execve -o /tmp/trace /typst compile --root /in "$@" >/tmp/log 2>&1; echo "exit $?" >>/tmp/log; cat /tmp/trace; echo "--- typst"; cat /tmp/log' \
+			sh "${typst[@]}" "$doc" /tmp/out.pdf >"$out/trace" 2>&1 || true
+		trace=$(sed '/^--- typst$/,$d' "$out/trace")
+		if ! grep -q 'execve("/typst"' <<<"$trace"; then
+			echo "FAIL strace did not trace the $name run:"
+			sed 's/^/     /' "$out/trace" | head -8
+			bad=1
+		elif grep -v 'execve(' <<<"$trace" | grep -q .; then
+			echo "FAIL the $name run made network system calls:"
+			grep -v 'execve(' <<<"$trace" | sed 's/^/     /' | head -8
+			bad=1
+		elif [ "$name" = import ] && ! grep -qF "package downloads are disabled" "$out/trace"; then
+			echo "FAIL the traced import did not reach the refusing downloader:"
+			sed -n '/^--- typst$/,$p' "$out/trace" | sed 's/^/     /' | tail -6
+			bad=1
+		elif [ "$name" = report ] && ! grep -qx 'exit 0' "$out/trace"; then
+			echo "FAIL the traced report did not render:"
+			sed -n '/^--- typst$/,$p' "$out/trace" | sed 's/^/     /' | tail -6
+			bad=1
+		else
+			echo "ok   the traced $name run made no network system call (strace -e trace=%network)"
+		fi
+	done
 
 	if [ -n "${OUT_DIR:-}" ]; then
 		mkdir -p "$OUT_DIR"
@@ -671,6 +692,9 @@ phrase checkFiles
 fetchsha checkTypst
 fetchpin checkTypst
 patch checkTypst
+fetchlicence checkTypst
+fetchdup checkTypst
+fonts checkTypst
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -694,6 +718,9 @@ breakCase() {
 	fetchsha) sed -i '0,/\t[0-9a-f]\{64\}\t/s//\tlatest\t/' build/typst/fetch.tsv ;;
 	fetchpin) sed -i '0,/\/[0-9a-f]\{40\}\//s//\/main\//' build/typst/fetch.tsv ;;
 	patch) rm build/typst/disable-package-downloads.patch ;;
+	fetchlicence) sed -i '0,/\tOFL-1\.1$/s//\tproprietary/' build/typst/fetch.tsv ;;
+	fetchdup) grep -m1 '^fonts/' build/typst/fetch.tsv >x && cat x >>build/typst/fetch.tsv && rm x ;;
+	fonts) printf '# none\n\n' >build/typst/fixtures/fonts.txt ;;
 	esac
 }
 
