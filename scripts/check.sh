@@ -18,10 +18,14 @@
 #   - the files image's fixture list names a file that is not there, a
 #     fixture has no row, or a row names a decoder the image does not hold
 #     or no phrase
-#     (build/agentry-files).
+#     (build/agentry-files);
+#   - the Typst image's fetch list has a row that is not four fields, names
+#     no pinned commit, has no SHA-256 or no known licence, or repeats a path;
+#     its patch is missing, empty or not named in source.env; or its font
+#     list is empty (build/typst).
 #
-# It pulls nothing and reads no credential, except in --unsafe-image and
-# --files-image mode, which run the image they name.
+# It pulls nothing and reads no credential, except in --unsafe-image,
+# --files-image and --typst-image mode, which run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -50,6 +54,20 @@
 #       signature database made here (the EICAR test file's MD5), and fails
 #       unless the EICAR file and a zip of it are found and every fixture is
 #       clean (agentry-dockerimages#30).
+#   scripts/check.sh --typst-image <ref>
+#       run a built agentry-typst with no network, every capability dropped,
+#       a read-only root and the invoking uid (plan scratch-and-pdf-reports
+#       §5, D24, D26, D27; agentry-dockerimages#48): `typst fonts` must list
+#       every family in build/typst/fixtures/fonts.txt; the fixture report
+#       (CJK, Arabic, Hindi and more, emoji, a table, code and a local image,
+#       through the vendored cmarker with raw-typst off) must render to a
+#       PDF/UA-1 PDF, and to PNG pages, which land in $OUT_DIR when it is set
+#       so a person can look at them; and an @preview import must fail with
+#       "package downloads are disabled". The import is run once more under
+#       strace, in a helper container (our alpine mirror with strace and
+#       file, which needs network to build), and fails on any network system
+#       call; `file` there must call the binary static. PLATFORM asks for, and
+#       checks, one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -101,7 +119,7 @@ checkScripts() {
 			bad=1
 		}
 	done
-	shellcheck scripts/*.sh build/agentry-files/tika-app || bad=1
+	shellcheck scripts/*.sh build/agentry-files/tika-app build/typst/fetch.sh || bad=1
 	return "$bad"
 }
 
@@ -428,9 +446,201 @@ unsafeImage() {
 	return "$bad"
 }
 
+TYPST_CTX=build/typst
+
+# checkTypst holds the Typst image's inputs to their rules: every fetched file
+# pinned to a commit and a SHA-256 with a licence, the downloader patch
+# present and named in source.env, and a font list to check the image by.
+checkTypst() {
+	local bad=0 n=0 dest url sha licence extra
+	while IFS=$'\t' read -r dest url sha licence extra; do
+		case "$dest" in '' | \#*) continue ;; esac
+		n=$((n + 1))
+		if [ -z "$licence" ] || [ -n "${extra:-}" ]; then
+			echo "$TYPST_CTX/fetch.tsv: $dest: want 4 tab-separated fields (path, url, sha256, licence)"
+			bad=1
+			continue
+		fi
+		case "$dest" in
+		fonts/* | licenses/fonts/* | typst-packages/*) ;;
+		*)
+			echo "$TYPST_CTX/fetch.tsv: $dest: not under fonts/, licenses/fonts/ or typst-packages/"
+			bad=1
+			;;
+		esac
+		if ! [[ "$url" =~ ^https://raw\.githubusercontent\.com/[^/]+/[^/]+/[0-9a-f]{40}/ ]]; then
+			echo "$TYPST_CTX/fetch.tsv: $dest: the URL names no pinned commit: $url"
+			bad=1
+		fi
+		if ! [[ "$sha" =~ ^[0-9a-f]{64}$ ]]; then
+			echo "$TYPST_CTX/fetch.tsv: $dest: no SHA-256: $sha"
+			bad=1
+		fi
+		case "$licence" in
+		OFL-1.1 | MIT | Apache-2.0) ;;
+		*)
+			echo "$TYPST_CTX/fetch.tsv: $dest: unknown licence $licence"
+			bad=1
+			;;
+		esac
+	done <"$TYPST_CTX/fetch.tsv"
+	[ "$n" -gt 0 ] || {
+		echo "$TYPST_CTX/fetch.tsv: no rows"
+		bad=1
+	}
+	dest=$(awk -F'\t' '!/^#/ && NF { print $1 }' "$TYPST_CTX/fetch.tsv" | sort | uniq -d)
+	if [ -n "$dest" ]; then
+		echo "$TYPST_CTX/fetch.tsv: a path twice: $dest"
+		bad=1
+	fi
+	if [ ! -s "$TYPST_CTX/disable-package-downloads.patch" ]; then
+		echo "$TYPST_CTX/disable-package-downloads.patch: missing or empty"
+		bad=1
+	elif ! grep -q 'disable-package-downloads\.patch' "$TYPST_CTX/source.env"; then
+		echo "$TYPST_CTX/source.env: does not name disable-package-downloads.patch"
+		bad=1
+	fi
+	if ! grep -qv '^#' "$TYPST_CTX/fixtures/fonts.txt"; then
+		echo "$TYPST_CTX/fixtures/fonts.txt: no font family"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# typstImage runs a built agentry-typst the way the runner's export_pdf will
+# (plan scratch-and-pdf-reports §5: no network, the invoking uid, every
+# capability dropped, a read-only root, a fixed argv with only the bundled
+# fonts and packages), over build/typst/fixtures/.
+typstImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" out fam got bad=0 rc helper want
+	checkTypst || return 1
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	chmod 777 "$out"
+	local run=("$runtime" run --rm --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--user "$(id -u):$(id -g)" --tmpfs /tmp:size=256m --pids-limit 256 --memory 1g
+		-v "$PWD/$TYPST_CTX/fixtures:/in:ro" -v "$out:/out")
+	[ -n "${PLATFORM:-}" ] && run+=(--platform "$PLATFORM")
+	local typst=(--ignore-system-fonts --font-path /fonts --package-path /typst-packages)
+
+	echo "version: $("${run[@]}" "$ref" --version)"
+	got=$("${run[@]}" "$ref" fonts "${typst[@]:0:3}")
+	while IFS= read -r fam; do
+		case "$fam" in '' | \#*) continue ;; esac
+		if grep -qxF -- "$fam" <<<"$got"; then
+			echo "ok   font family $fam"
+		else
+			echo "FAIL font family $fam is not in /fonts"
+			bad=1
+		fi
+	done <"$TYPST_CTX/fixtures/fonts.txt"
+
+	if "${run[@]}" "$ref" compile --root /in "${typst[@]}" --pdf-standard ua-1 \
+		/in/report.typ /out/report.pdf 2>"$out/err"; then
+		if [ "$(head -c 5 "$out/report.pdf")" = "%PDF-" ] && python3 - "$out/report.pdf" <<'EOF'; then
+import re, sys, zlib
+data = open(sys.argv[1], "rb").read()
+# Look in every stream too: the catalog and the XMP may be compressed.
+text = [data]
+for m in re.finditer(rb"stream\r?\n", data):
+    try:
+        text.append(zlib.decompressobj().decompress(data[m.end():m.end() + 4000000]))
+    except zlib.error:
+        pass
+blob = b"\n".join(text)
+need = {b"/StructTreeRoot": "a structure tree", b"/MarkInfo": "MarkInfo",
+        b"pdfuaid:part": "the PDF/UA identification"}
+missing = [v for k, v in need.items() if k not in blob]
+if missing:
+    print("     the PDF has no " + ", no ".join(missing))
+    sys.exit(1)
+EOF
+			echo "ok   the sample renders to a tagged PDF/UA-1 PDF ($(wc -c <"$out/report.pdf" | tr -d ' ') bytes)"
+		else
+			echo "FAIL the sample's PDF is not a tagged PDF/UA-1 PDF"
+			bad=1
+		fi
+	else
+		echo "FAIL the sample did not render:"
+		sed 's/^/     /' "$out/err" | tail -15
+		bad=1
+	fi
+	if "${run[@]}" "$ref" compile --root /in "${typst[@]}" --format png --ppi 96 \
+		/in/report.typ '/out/report-{0p}.png' 2>"$out/err" && ls "$out"/report-*.png >/dev/null 2>&1; then
+		echo "ok   the sample renders to $(find "$out" -name 'report-*.png' | wc -l | tr -d ' ') PNG pages"
+	else
+		echo "FAIL the sample did not render to PNG:"
+		sed 's/^/     /' "$out/err" | tail -15
+		bad=1
+	fi
+
+	rc=0
+	"${run[@]}" "$ref" compile --root /in "${typst[@]}" /in/import.typ /out/import.pdf >"$out/import.err" 2>&1 || rc=$?
+	if [ "$rc" -ne 0 ] && grep -qF "package downloads are disabled" "$out/import.err"; then
+		echo "ok   an @preview import fails: $(grep -m1 -F 'package downloads are disabled' "$out/import.err")"
+	else
+		echo "FAIL an @preview import did not fail with \"package downloads are disabled\" (exit $rc):"
+		sed 's/^/     /' "$out/import.err" | tail -8
+		bad=1
+	fi
+
+	# The same import under strace: not one network system call, so the
+	# refusal is the binary's own and no network block is needed for it.
+	local alpine
+	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print "ghcr.io/blaktron/agentry-alpine:3.22@" $3 }' "$MANIFEST")
+	helper="local/agentry-typst-check:$$"
+	# shellcheck disable=SC2016 # ${TYPST} and ${ALPINE} are the Dockerfile's
+	if printf 'ARG TYPST\nARG ALPINE\nFROM ${TYPST} AS typst\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=typst /typst /typst\n' |
+		"$runtime" build -q ${PLATFORM:+--platform "$PLATFORM"} --build-arg TYPST="$ref" --build-arg ALPINE="$alpine" -t "$helper" - >/dev/null; then
+		want=""
+		case "${PLATFORM:-}" in
+		*/amd64) want="x86-64" ;;
+		*/arm64) want="aarch64" ;;
+		esac
+		got=$("$runtime" run --rm --network none "$helper" file -b /typst)
+		echo "     file: $got"
+		if [[ "$got" == *"static"* ]] && [[ "$got" != *"dynamically"* ]] && [[ -z "$want" || "$got" == *"$want"* ]]; then
+			echo "ok   /typst is a static ${want:-binary}"
+		else
+			echo "FAIL /typst is not a static ${want:-binary}"
+			bad=1
+		fi
+		"$runtime" run --rm --network none --cap-add SYS_PTRACE --security-opt label=disable \
+			-v "$PWD/$TYPST_CTX/fixtures:/in:ro" "$helper" sh -c \
+			'strace -f -qq -e trace=%network,execve -o /tmp/trace /typst compile --root /in --ignore-system-fonts /in/import.typ /tmp/x.pdf >/dev/null 2>&1; cat /tmp/trace' >"$out/trace" || true
+		# execve is traced too, so an empty trace (strace not running) cannot
+		# pass for a clean one.
+		if ! grep -q 'execve("/typst"' "$out/trace"; then
+			echo "FAIL strace did not trace the import:"
+			sed 's/^/     /' "$out/trace" | head -8
+			bad=1
+		elif grep -v 'execve(' "$out/trace" | grep -q .; then
+			echo "FAIL the @preview import made network system calls:"
+			grep -v 'execve(' "$out/trace" | sed 's/^/     /' | head -8
+			bad=1
+		else
+			echo "ok   the @preview import made no network system call (strace -e trace=%network)"
+		fi
+		"$runtime" rmi -f "$helper" >/dev/null 2>&1 || true
+	else
+		echo "FAIL could not build the strace helper from $alpine"
+		bad=1
+	fi
+
+	if [ -n "${OUT_DIR:-}" ]; then
+		mkdir -p "$OUT_DIR"
+		cp "$out"/report.pdf "$out"/report-*.png "$OUT_DIR"/ 2>/dev/null || true
+		echo "     the PDF and the PNG pages are in $OUT_DIR"
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -458,6 +668,9 @@ fixture checkFiles
 decoder checkFiles
 unlisted checkFiles
 phrase checkFiles
+fetchsha checkTypst
+fetchpin checkTypst
+patch checkTypst
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -478,6 +691,9 @@ breakCase() {
 	decoder) sed -i 's/^policy.docx\tpandoc\t/policy.docx\tlibreoffice\t/' build/agentry-files/fixtures/expect.tsv ;;
 	unlisted) cp build/agentry-files/fixtures/memo.rtf build/agentry-files/fixtures/unlisted.rtf ;;
 	phrase) sed -i 's/^memo.rtf\tpandoc\t.*/memo.rtf\tpandoc\t/' build/agentry-files/fixtures/expect.tsv ;;
+	fetchsha) sed -i '0,/\t[0-9a-f]\{64\}\t/s//\tlatest\t/' build/typst/fetch.tsv ;;
+	fetchpin) sed -i '0,/\/[0-9a-f]\{40\}\//s//\/main\//' build/typst/fetch.tsv ;;
+	patch) rm build/typst/disable-package-downloads.patch ;;
 	esac
 }
 
@@ -525,6 +741,13 @@ case "${1:-}" in
 	}
 	filesImage "$2"
 	;;
+--typst-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --typst-image <ref>" >&2
+		exit 2
+	}
+	typstImage "$2"
+	;;
 --clamav-db)
 	if [ $# -ne 3 ] || [ ! -d "$2" ]; then
 		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
@@ -534,7 +757,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
