@@ -18,7 +18,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
-| `agentry-typst:2026.10.08.1` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
+| `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -442,7 +442,16 @@ Upstream's own release binary is 55.7 MB, with its downloader and embedded
 fonts. The rest is 45 font files (about 42 MB) and cmarker (340 KB). The
 published images report 87,356,748 bytes (amd64) and 81,437,396 (arm64).
 
-The first build is `ghcr.io/blaktron/agentry-typst:2026.10.08.1@sha256:37eb0ef5b52af3abd4635f249fa06e6aab4a13626abda482d40bdfe9a38828b9`
+The pinned build is `ghcr.io/blaktron/agentry-typst:2026.10.09.2@sha256:da55b1dbe359c01def900853b2e65803bf783d8098b4ddcea6164ca946d38dd1`
+(run 37925989779, 2026-10-09; agentry-dockerimages#58), the first with the
+report designs' families: amd64 `ac721b55…` at 109,500,845 bytes and arm64
+`51ceee24…` at 103,581,493. Each architecture, then the joined digest, passed
+every `--typst-image` check, the families render included. The signature
+verified from the workstation, an anonymous manifest fetch answered 200, and
+the published amd64 digest passed the check there too, its families pages
+byte-identical to the local build's.
+
+The first build was `ghcr.io/blaktron/agentry-typst:2026.10.08.1@sha256:37eb0ef5b52af3abd4635f249fa06e6aab4a13626abda482d40bdfe9a38828b9`
 (run 37784329814, 2026-10-08): amd64 `d0fe82c2…` and arm64 `027b84c3…`.
 Each architecture, then the joined digest, passed every `--typst-image`
 check. arm64's binary is statically linked; amd64's is static-pie. 311 crates
