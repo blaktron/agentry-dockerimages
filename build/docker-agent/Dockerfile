@@ -25,13 +25,16 @@
 #      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
 #      binary is still CGO with external linking, checked to be static, and
 #      built with -tags no_audio and the same version ldflags.
+#   5. Go 1.27.2, not upstream's 1.27.0 (upstream.Dockerfile's GO_VERSION): the
+#      standard library's net/http and HTTP/2 advisories of 2026-10-08 are
+#      fixed in 1.27.2 (#61). The module's own go line is upstream's.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
 # image, still apply. A run needs neither docker-cli nor the docker-mcp plugin;
 # removing them changes behaviour and needs a live run to confirm.
 
-ARG GO_IMAGE=golang:1.27.0-alpine3.23
+ARG GO_IMAGE=golang:1.27.2-alpine3.23
 ARG ALPINE_IMAGE=alpine:3.23
 ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 
