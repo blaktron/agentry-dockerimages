@@ -78,6 +78,16 @@ name identifies the upstream component.
   source repository under `/licenses/fonts/`. They are redistributed
   unmodified and are not sold alone. "Noto" is a trademark of Google LLC, used
   only to identify the fonts.
+- the report designs' fonts, from `google/fonts` (Google Fonts' published
+  builds): Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat, Source
+  Serif 4, Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair Display,
+  IBM Plex Mono, JetBrains Mono and Source Code Pro. Each is under the SIL Open
+  Font License 1.1, with its copyright holders and any Reserved Font Name
+  ("Source", "Plex", "Lora", "Merriweather", "Playfair Display") in the
+  `OFL.txt` shipped under `/licenses/fonts/google-fonts-<family>.OFL.txt`.
+  They are redistributed unmodified (only the files are renamed, to
+  `*-Variable.ttf` where Google Fonts ships a variable font) and are not sold
+  alone. Each name is used only to identify its font.
 - `cmarker` 0.1.10 (Sabrina Jewson), from `typst/packages`: MIT, its
   `LICENSE` beside it in `/typst-packages/preview/cmarker/0.1.10/`. It includes
   the author's WebAssembly build of its Markdown parser (`plugin.wasm`),
