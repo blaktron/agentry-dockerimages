@@ -19,6 +19,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
+| `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -484,6 +485,17 @@ cosign verify ghcr.io/blaktron/agentry-codex@<digest> \
 
 and the Codex binary inside it against OpenAI's signature with
 `scripts/check.sh --codex-image ghcr.io/blaktron/agentry-codex@<digest>`.
+
+The first build is `ghcr.io/blaktron/agentry-codex:0.162.0-2026.10.09.1@sha256:e6b0c020b797d7941b4365f82e743f190f82342f087621bddf57b087e4d703f9`
+(run 37965185630, 2026-10-09): amd64 `e4b56749…` and arm64 `c9372dc4…`.
+Each architecture's build verified OpenAI's signature and refused all three
+negative controls. Each architecture, then the joined digest, passed every
+line of `--codex-image`; the arm64 binary's SHA-256 is `7993e8a9…`, the amd64
+one's `50ed828f…`. The signature verified from the workstation the same day,
+`--codex-image` passed there against the published digest, and anonymous
+manifest fetches of `agentry-codex` and `agentry-cosign` answered 200. The
+native images report 302,726,038 bytes (amd64) and 263,424,091 (arm64) in
+the build jobs' Docker size reports.
 
 **Bumping Codex.** By hand; nothing moves it on its own. OpenAI releases a
 stable Codex every few days, and a bump is worth it for a fix the adapter
