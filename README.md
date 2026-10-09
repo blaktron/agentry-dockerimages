@@ -18,7 +18,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
-| `agentry-typst:2026.10.08.1` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
+| `agentry-typst:2026.10.08.1` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -424,7 +424,7 @@ to `COPY --from=ghcr.io/blaktron/agentry-typst@<digest>`:
 | Path | What |
 |---|---|
 | `/typst` | the static binary; also the entrypoint, so the checks can run the image |
-| `/fonts/` | the Noto set: Sans, Serif and Mono for Latin, Greek and Cyrillic; Arabic, Hebrew, Thai, Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Sinhala, Tamil, Telugu; Simplified Chinese and Korean; Symbols, Symbols 2, Math; Noto Color Emoji (COLRv1). All OFL-1.1 |
+| `/fonts/` | the Noto set: Sans, Serif and Mono for Latin, Greek and Cyrillic; Arabic, Hebrew, Thai, Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Sinhala, Tamil, Telugu; Simplified Chinese and Korean; Symbols, Symbols 2, Math; Noto Color Emoji (COLRv1). And the report designs' fourteen families ([below](#the-report-design-families)). All OFL-1.1 |
 | `/typst-packages/` | the `cmarker` package 0.1.10 (MIT), as Typst's local package directory (`preview/cmarker/0.1.10/`), for `--package-path` |
 | `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence and notice files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv` for crates that ship none), the OFL text of each font source, and `fetch.tsv` |
 
@@ -486,6 +486,8 @@ differs fails the build. The sources:
 - the Noto project's published builds, `notofonts/notofonts.github.io`;
 - `notofonts/noto-cjk`, for the CJK region subsets;
 - `googlefonts/noto-emoji` at `v2.051`;
+- `google/fonts`, for the report designs' families
+  ([below](#the-report-design-families));
 - `typst/packages`, for cmarker.
 
 The licence column of `fetch.tsv` names each file's licence, and
@@ -494,6 +496,42 @@ cmarker's own default for `raw-typst` is `true`. The runner's template must
 pass `raw-typst: false`, so the Markdown never injects Typst code; that is
 the template's job (agentry-cli, M3). The check's fixture template does the
 same.
+
+### The report design families
+
+The report designs (agentry-notes `plans/report-designs.md`, D3 and D13;
+agentry-dockerimages#58) set their headings, body and code in one of fourteen
+open-licence families, with Noto behind each for the scripts it lacks:
+
+- sans: Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat (headings);
+- serif: Source Serif 4, Lora, Merriweather, IBM Plex Serif, EB Garamond,
+  Playfair Display (headings);
+- mono: IBM Plex Mono, JetBrains Mono, Source Code Pro.
+
+All come from `google/fonts` at one pinned commit (`62e55e58`, 2026-10-09),
+Google Fonts' published build of each family, under OFL-1.1 with the
+`OFL.txt` of each family's directory in `/licenses/fonts/`. That is one source
+for all fourteen, and its family names are the ones the site's editor uses for
+its web-font preview. Upstream's own repositories do not all commit a TTF: Inter's ships
+its static faces only as WOFF2, which Typst does not read, and Playfair
+Display's repository now holds its successor. Twelve families ship there only
+as a variable roman and a variable italic, which `fetch.tsv` saves as
+`*-Variable.ttf`. They carry every weight, and Typst 0.15.1 instances them,
+in the PDF as well as the PNG: checked by rasterising the PDF with poppler,
+not only Typst's own PNG. A variable family's PDF font name is still its
+default instance's (`Montserrat-Thin`, `SourceCodePro-ExtraLight`), which is
+only the name. IBM Plex Serif and IBM Plex Mono ship static there, and take
+Regular, Italic, Bold and Bold Italic. Together they add 32 font files, about
+22 MB; Merriweather's three axes make it 9 MB of that.
+
+`fixtures/fonts.txt` lists the families after Noto's, and every family there
+whose name does not start with "Noto" is a design family. The check renders
+`fixtures/families.typ` once with all of them. Each family gets a block of
+regular, bold, italic and bold italic text, with a line of Chinese, Arabic and
+Hindi behind it. The check fails on an "unknown font family" warning, since
+Typst would otherwise set the text in the next family without failing. It
+also fails unless the PDF is tagged PDF/UA-1 and embeds every design family
+and Noto's SC, Arabic and Devanagari fonts.
 
 **The check.** `scripts/check.sh --typst-image <ref>` runs the image the way
 `export_pdf` will. The container has no network, every capability dropped, a

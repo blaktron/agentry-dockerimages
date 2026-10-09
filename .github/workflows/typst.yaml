@@ -201,7 +201,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-typst\tghcr.io/blaktron/agentry-typst:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the PDF renderer's files for export_pdf: Typst built from source without its package downloader (/typst), the Noto fonts (/fonts) and cmarker (/typst-packages), files only, amd64 and arm64, signed keyless by the typst workflow (agentry-cli copies them into the runner image)")
+            "the PDF renderer's files for export_pdf: Typst built from source without its package downloader (/typst), the Noto fonts and the report designs' families (/fonts) and cmarker (/typst-packages), files only, amd64 and arm64, signed keyless by the typst workflow (agentry-cli copies them into the runner image)")
           {
             echo "### agentry-typst:$IMAGE_TAG"
             echo

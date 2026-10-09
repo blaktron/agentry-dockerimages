@@ -1,7 +1,7 @@
-# Typst, built from pinned upstream source, with the Noto fonts and the
-# cmarker package, as a files-only image (agentry-notes
-# plans/scratch-and-pdf-reports.md §5, D23, D25, D26, D27;
-# agentry-dockerimages#48).
+# Typst, built from pinned upstream source, with the Noto fonts, the report
+# designs' font families and the cmarker package, as a files-only image
+# (agentry-notes plans/scratch-and-pdf-reports.md §5, D23, D25, D26, D27;
+# agentry-dockerimages#48; plans/report-designs.md D13, agentry-dockerimages#58).
 #
 #   upstream   github.com/typst/typst
 #   commit     source.env beside this file
@@ -26,7 +26,7 @@
 #      turns `system-downloader` on unconditionally (checked at v0.15.1). The
 #      patch must be re-checked at every tag bump.
 #   3. `--no-default-features`: no HTTP server (`typst watch` serving) and no
-#      embedded fonts. The fonts are the bundled Noto set in /fonts. Upstream
+#      embedded fonts. The fonts are the bundled set in /fonts. Upstream
 #      builds the defaults.
 #   4. Native builds only, one architecture per run (no xx cross-compiling).
 #      The binary is checked to be static, with no OpenSSL or HTTP client in
@@ -37,7 +37,8 @@
 #
 #   /typst            the static binary (it is also the entrypoint, so the
 #                     image can be run for the checks)
-#   /fonts/           the Noto set (fetch.tsv)
+#   /fonts/           the Noto set and the report designs' fourteen families
+#                     (fetch.tsv)
 #   /typst-packages/  the cmarker package, for --package-path
 #   /licenses/        Typst's LICENSE and NOTICE, the patch, the licence files
 #                     of the crates linked into the binary, the fonts' OFL
@@ -126,7 +127,7 @@ COPY --from=agentry disable-package-downloads.patch /licenses/typst/
 COPY --from=builder /crate-licenses/ /licenses/crates/
 ENTRYPOINT ["/typst"]
 
-LABEL org.opencontainers.image.title="Typst (built by Agentry), with the Noto fonts and cmarker" \
+LABEL org.opencontainers.image.title="Typst (built by Agentry), with the Noto fonts, the report design fonts and cmarker" \
 	org.opencontainers.image.source="https://github.com/blaktron/agentry-dockerimages" \
 	org.opencontainers.image.licenses="Apache-2.0 AND OFL-1.1 AND MIT" \
-	org.opencontainers.image.description="Typst built from a pinned upstream commit without its package downloader, the Noto font set and the cmarker package, files only, for the QuickAgent runner's export_pdf"
+	org.opencontainers.image.description="Typst built from a pinned upstream commit without its package downloader, the Noto font set, the report designs' open-licence font families and the cmarker package, files only, for the QuickAgent runner's export_pdf"
