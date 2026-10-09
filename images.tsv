@@ -17,7 +17,7 @@
 # opensearch, secureagentryd) are not listed here.
 agentry-mcp-gateway	docker/mcp-gateway:v0.43.3	sha256:e3ee13818cb067a506c5e9acdb2bb4fe0e601caef7d116fc329755782f1a3cfa	mirror	the tool plane: Docker's MCP gateway, started once per run with --block-network (policy images.gateway)
 agentry-docker-agent	docker/docker-agent:1.128.0	sha256:50bef17dfbc43c56f8c7c68eade9fc36cd4de5a2fc7ad0f28e34d0030002d5f1	mirror	the default harness, the agent program that talks to the model (policy images.harnessDockerAgent); build/docker-agent/ is the from-source replacement, not yet the published image
-agentry-golang-alpine	golang:1.27-alpine	sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414	mirror	builds the local runner image: the GO_IMAGE build-arg of runnerimage/Dockerfile (policy images.goBuilder)
+agentry-golang-alpine	golang:1.27-alpine	sha256:738d1cf061836894ff6bb8c33881080ac66de8cf0586615012a0c8f592649cfa	mirror	builds the local runner image: the GO_IMAGE build-arg of runnerimage/Dockerfile (policy images.goBuilder)
 agentry-alpine	alpine:3.22	sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8	mirror	the runner image's runtime base: the FROM of runnerimage/Dockerfile's second stage
 agentry-node-alpine	node:22-alpine	sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85	mirror	installs and runs a QuickAgent's declared npm MCP servers (policy images.nodeRuntime of CLIs before agentry-cli#608, and policies that pin it)
 agentry-node-alpine	node:24-alpine	sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1	mirror	installs and runs a QuickAgent's declared npm MCP servers (policy images.nodeRuntime; the default since agentry-cli#608)
