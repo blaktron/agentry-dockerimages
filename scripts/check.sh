@@ -23,7 +23,8 @@
 #     outside fonts/, licenses/fonts/ and typst-packages/, names no pinned
 #     commit, has no SHA-256 or no known licence, or repeats a path; its
 #     patch is missing, empty, not applied by its Dockerfile or not named in
-#     source.env; or its font list names no family (build/typst).
+#     source.env; its font list names no family, or no report design's
+#     family (one not named Noto); or families.typ is missing (build/typst).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image and --typst-image mode, which run the image they name.
@@ -62,8 +63,14 @@
 #       every family in build/typst/fixtures/fonts.txt; the fixture report
 #       (CJK, Arabic, Hindi and more, emoji, a table, code and a local image,
 #       through the vendored cmarker with raw-typst off) must render to a
-#       PDF/UA-1 PDF, and to PNG pages, which land in $OUT_DIR when it is set
-#       so a person can look at them; and an @preview import must fail with
+#       PDF/UA-1 PDF, and to PNG pages; families.typ, a block in each report
+#       design's family (every family of fonts.txt not named Noto; plan
+#       report-designs D13, agentry-dockerimages#58) with Chinese, Arabic and
+#       Hindi behind it, must render to a PDF/UA-1 PDF with no unknown-family
+#       warning that embeds every one of those families and the three Noto
+#       fallbacks, and to PNG pages; the PDFs and PNG pages land in $OUT_DIR
+#       when it is set so a person can look at them; and an @preview import
+#       must fail with
 #       "package downloads are disabled". The import is run once more under
 #       strace, in a helper container (our alpine mirror with strace and
 #       file, which needs network to build), and fails on any network system
@@ -509,8 +516,22 @@ checkTypst() {
 	if ! grep -qvE '^(#|[[:space:]]*$)' "$TYPST_CTX/fixtures/fonts.txt"; then
 		echo "$TYPST_CTX/fixtures/fonts.txt: no font family"
 		bad=1
+	elif [ -z "$(designFamilies)" ]; then
+		echo "$TYPST_CTX/fixtures/fonts.txt: no report design family (one not named Noto)"
+		bad=1
+	fi
+	if [ ! -s "$TYPST_CTX/fixtures/families.typ" ]; then
+		echo "$TYPST_CTX/fixtures/families.typ: missing or empty"
+		bad=1
 	fi
 	return "$bad"
+}
+
+# designFamilies prints the report designs' families, one a line: every family
+# of fixtures/fonts.txt whose name does not start with "Noto" (plan
+# report-designs D13).
+designFamilies() {
+	grep -vE '^(#|[[:space:]]*$|Noto )' "$TYPST_CTX/fixtures/fonts.txt" || true
 }
 
 # typstImage runs a built agentry-typst the way the runner's export_pdf will
@@ -586,6 +607,60 @@ EOF
 		bad=1
 	fi
 
+	# Each report design's family, with Noto behind it for Chinese, Arabic and
+	# Hindi (plan report-designs D3, D13). A family the image lacks is only a
+	# warning to Typst, which then sets the text in the next family, so the
+	# warning fails the check, and so does a PDF that does not embed the family
+	# (by its PostScript name, the family's name without spaces; a variable
+	# font's is its default instance's, e.g. Montserrat-Thin, which is only
+	# the name: Typst embeds the instanced outlines).
+	local families
+	families=$(designFamilies | paste -sd'|' -)
+	if "${run[@]}" "$ref" compile --root /in "${typst[@]}" --pdf-standard ua-1 \
+		--input "families=$families" /in/families.typ /out/families.pdf 2>"$out/err" &&
+		! grep -qiF "unknown font family" "$out/err"; then
+		if python3 - "$out/families.pdf" "$families" <<'EOF'; then
+import re, sys, zlib
+data = open(sys.argv[1], "rb").read()
+text = [data]
+for m in re.finditer(rb"stream\r?\n", data):
+    try:
+        text.append(zlib.decompressobj().decompress(data[m.end():m.end() + 4000000]))
+    except zlib.error:
+        pass
+blob = b"\n".join(text)
+embedded = {n.decode("latin-1") for n in re.findall(rb"/BaseFont\s*/(?:[A-Z]{6}\+)?([^\s/<>\[\]()]+)", blob)}
+want = [f for f in sys.argv[2].split("|") if f] + ["Noto Sans SC", "Noto Sans Arabic", "Noto Sans Devanagari"]
+missing = [f for f in want if not any(e.startswith(f.replace(" ", "")) for e in embedded)]
+untagged = [k.decode() for k in (b"/StructTreeRoot", b"/MarkInfo", b"pdfuaid:part") if k not in blob]
+if missing or untagged:
+    if missing:
+        print("     the families PDF embeds no " + ", no ".join(missing))
+    if untagged:
+        print("     the families PDF has no " + ", no ".join(untagged))
+    sys.exit(1)
+print("     embedded: %d families and the Noto fallbacks for Chinese, Arabic and Hindi" % (len(want) - 3))
+EOF
+			echo "ok   families.typ renders in every report design family, with Noto behind each, to a tagged PDF/UA-1 PDF"
+		else
+			echo "FAIL the families PDF does not embed every family, or is not tagged"
+			bad=1
+		fi
+	else
+		echo "FAIL families.typ did not render, or named a family the image lacks:"
+		sed 's/^/     /' "$out/err" | tail -15
+		bad=1
+	fi
+	if "${run[@]}" "$ref" compile --root /in "${typst[@]}" --format png --ppi 96 \
+		--input "families=$families" /in/families.typ '/out/families-{0p}.png' 2>"$out/err" &&
+		ls "$out"/families-*.png >/dev/null 2>&1; then
+		echo "ok   families.typ renders to $(find "$out" -name 'families-*.png' | wc -l | tr -d ' ') PNG pages"
+	else
+		echo "FAIL families.typ did not render to PNG:"
+		sed 's/^/     /' "$out/err" | tail -15
+		bad=1
+	fi
+
 	rc=0
 	"${run[@]}" "$ref" compile --root /in "${typst[@]}" /in/import.typ /out/import.pdf >"$out/import.err" 2>&1 || rc=$?
 	if [ "$rc" -ne 0 ] && grep -qF "package downloads are disabled" "$out/import.err"; then
@@ -653,7 +728,7 @@ EOF
 
 	if [ -n "${OUT_DIR:-}" ]; then
 		mkdir -p "$OUT_DIR"
-		cp "$out"/report.pdf "$out"/report-*.png "$OUT_DIR"/ 2>/dev/null || true
+		cp "$out"/report.pdf "$out"/report-*.png "$out"/families.pdf "$out"/families-*.png "$OUT_DIR"/ 2>/dev/null || true
 		echo "     the PDF and the PNG pages are in $OUT_DIR"
 	fi
 	return "$bad"
@@ -695,6 +770,7 @@ patch checkTypst
 fetchlicence checkTypst
 fetchdup checkTypst
 fonts checkTypst
+designfonts checkTypst
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -721,6 +797,7 @@ breakCase() {
 	fetchlicence) sed -i '0,/\tOFL-1\.1$/s//\tproprietary/' build/typst/fetch.tsv ;;
 	fetchdup) grep -m1 '^fonts/' build/typst/fetch.tsv >x && cat x >>build/typst/fetch.tsv && rm x ;;
 	fonts) printf '# none\n\n' >build/typst/fixtures/fonts.txt ;;
+	designfonts) sed -i '/^Noto /!{/^#/!d}' build/typst/fixtures/fonts.txt ;;
 	esac
 }
 
