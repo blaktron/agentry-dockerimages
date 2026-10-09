@@ -1,0 +1,236 @@
+# Build, check, sign and publish agentry-codex, the Codex harness image, to
+# ghcr.io/blaktron. It holds OpenAI's Codex CLI release binary, verified
+# against OpenAI's keyless sigstore signature, on our Alpine mirror; the CLI's
+# codex container adapter runs it for a ChatGPT model sign-in (agentry-notes
+# plans/model-sign-ins.md §4.3, D5, D11; agentry-dockerimages#53).
+#
+# Dispatched by hand, from main only: a run with packages: write can push any
+# tag this repository's packages hold. The guard is a step in this file, so a
+# branch's copy could drop it; what a branch cannot do is sign as this
+# workflow on main, the identity the CLI verifies. Each run is tagged with the Codex version, its UTC date and the run
+# number (0.162.0-2026.10.09.1) and refuses a tag that exists, so a rebuild is
+# a new tag and a new digest; the agentry-codex row in images.tsv then takes
+# it, and the CLI pins that digest.
+#
+# The prepare job checks that the cosign image the build verifies with is
+# signed by sigstore (keyless@projectsigstore.iam.gserviceaccount.com, as
+# Google's issuer certifies it) at the digest images.tsv pins, then mirrors it
+# by that digest (agentry-cosign), so the package exists, and is public,
+# before either build pulls it.
+#
+# Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
+# ubuntu-24.04-arm. The build itself fails unless the release tarball matches
+# its SHA-256 and the binary verifies as OpenAI's rust-release.yml at the
+# pinned tag and commit, and unless the same verifier refuses a tampered copy
+# and another tag's identity (build/agentry-codex/fetch.sh). Then
+# scripts/check.sh --codex-image runs the image hardened, with no network and
+# a read-only root, and verifies the binary in it again, before it is pushed.
+# Each build job hands the merge the digest it pushed, never a tag. The merge
+# joins those digests, holds the joined index to listing exactly them, checks
+# it by digest, and signs that same digest with cosign, keyless, as this
+# workflow on main (id-token: write, in that job alone). The signature is
+# verified against that identity before the run reports the images.tsv row.
+# This repository is public, so both runners are free, and each is a fresh
+# virtual machine per job. Pushing uses the workflow's GITHUB_TOKEN; a package
+# this workflow creates is public.
+name: codex
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash with -eo pipefail, so a `| tee` never hides a failure.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: codex
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Refuse any branch but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::dispatch this workflow from main; it pushes and signs public images"
+          exit 1
+
+      # TODO: pin by commit SHA (agentry-cli#165).
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check the manifest, the scripts and the workflows
+        run: ./scripts/check.sh
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Choose the tag, the Codex version, the UTC date and the run number, and refuse one that exists
+        id: tag
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^CODEX_VERSION=//p' build/agentry-codex/source.env)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::no CODEX_VERSION in source.env"; exit 1; }
+          tag="$version-$(date -u +%Y.%m.%d).${{ github.run_number }}"
+          if docker buildx imagetools inspect "ghcr.io/blaktron/agentry-codex:$tag" >/dev/null 2>&1; then
+            echo "::error::ghcr.io/blaktron/agentry-codex:$tag exists; a rebuild is a new tag"
+            exit 1
+          fi
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Check sigstore's signature on the pinned cosign image
+        run: |
+          set -euo pipefail
+          read -r upstream digest < <(awk -F'\t' '$1 == "agentry-cosign" { print $2, $3 }' images.tsv)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no agentry-cosign row in images.tsv"; exit 1; }
+          cosign verify "${upstream%:*}@$digest" \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com >/dev/null
+          echo "verified ${upstream%:*}@$digest as sigstore's"
+
+      - name: Mirror the cosign image by digest
+        run: ./scripts/mirror.sh agentry-cosign
+
+  build:
+    needs: prepare
+    strategy:
+      # Each architecture checks and pushes on its own; a re-run of a failed
+      # job completes the pair. The merge waits for both.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build this architecture (fetches, holds to the SHA-256, verifies OpenAI's signature)
+        run: |
+          ./scripts/build.sh agentry-codex
+          docker image inspect "ghcr.io/blaktron/agentry-codex:$IMAGE_TAG-${PLATFORM##*/}" --format 'image size: {{.Size}} bytes'
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Run it hardened with no network, and verify the binary in it again
+        run: ./scripts/check.sh --codex-image "ghcr.io/blaktron/agentry-codex:$IMAGE_TAG-${PLATFORM##*/}"
+
+      - name: Push this architecture and record the digest it pushed
+        run: |
+          set -euo pipefail
+          docker push "ghcr.io/blaktron/agentry-codex:$IMAGE_TAG-${PLATFORM##*/}" | tee push.out
+          digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' push.out | tail -1)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest from the push"; exit 1; }
+          mkdir -p digest
+          echo "${PLATFORM##*/}=$digest" >"digest/${PLATFORM##*/}"
+          echo "pushed ${PLATFORM##*/} as $digest"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.runner }}
+          path: digest/
+          retention-days: 1
+
+  merge:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      # cosign's keyless signature: the workflow's OIDC identity is the
+      # signing identity the CLI's pin check verifies.
+      id-token: write
+    env:
+      IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+      IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/codex.yaml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digest-*
+          path: digest
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Join the checked digests into one tag
+        run: |
+          set -euo pipefail
+          PART_DIGESTS=$(cat digest/* | tr '\n' ' ')
+          export PART_DIGESTS
+          echo "parts: $PART_DIGESTS"
+          ./scripts/build.sh --merge agentry-codex | tee merge.out
+          digest=$(sed -n 's/^merged; digest: //p' merge.out)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::no digest from the merge"; exit 1; }
+          echo "DIGEST=$digest" >>"$GITHUB_ENV"
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Check the joined digest
+        env:
+          PLATFORM: linux/amd64
+        run: ./scripts/check.sh --codex-image "ghcr.io/blaktron/agentry-codex@$DIGEST"
+
+      - name: Sign the joined digest, keyless
+        run: cosign sign --yes "ghcr.io/blaktron/agentry-codex@$DIGEST"
+
+      - name: Verify the signature against this workflow's identity
+        run: |
+          cosign verify "ghcr.io/blaktron/agentry-codex@$DIGEST" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" >/dev/null
+          echo "verified $DIGEST as $IDENTITY"
+
+      - name: Write the images.tsv row and the signing identity to the run's summary
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^CODEX_VERSION=//p' build/agentry-codex/source.env)
+          row=$(printf 'agentry-codex\tghcr.io/blaktron/agentry-codex:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
+            "the Codex harness image: OpenAI's Codex CLI $version release binary (musl), verified against OpenAI's sigstore signature, on our alpine:3.22 mirror, uid 10001, amd64 and arm64, signed keyless by the codex workflow (agentry-cli images.harnessImages.codex, the default for a ChatGPT model sign-in)")
+          {
+            echo "### agentry-codex:$IMAGE_TAG"
+            echo
+            echo '```'
+            echo "$row"
+            echo '```'
+            echo
+            echo "Signed keyless; verify with:"
+            echo
+            echo '```'
+            echo "cosign verify ghcr.io/blaktron/agentry-codex@$DIGEST --certificate-identity $IDENTITY --certificate-oidc-issuer $ISSUER"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "$row"
