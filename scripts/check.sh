@@ -25,9 +25,16 @@
 #     patch is missing, empty, not applied by its Dockerfile or not named in
 #     source.env; its font list names no family, or no report design's
 #     family (one not named Noto); or families.typ is missing (build/typst).
+#   - the Codex image's source.env does not pin a release version, its tag,
+#     a commit and a SHA-256 for each architecture's tarball and for LICENSE
+#     and NOTICE; verify.sh does not pin OpenAI's release workflow, GitHub's
+#     issuer and the commit; fetch.sh does not verify the binary and run the
+#     three negative controls; or the Dockerfile does not run fetch.sh
+#     (build/agentry-codex).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
-# --files-image and --typst-image mode, which run the image they name.
+# --files-image, --typst-image and --codex-image mode, which run the image
+# they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -76,6 +83,17 @@
 #       file, which needs network to build), and fails on any network system
 #       call; `file` there must call the binary static. PLATFORM asks for, and
 #       checks, one architecture.
+#   scripts/check.sh --codex-image <ref>
+#       run a built agentry-codex hardened, as the CLI runs a harness (no
+#       network, every capability dropped, no new privileges, a read-only
+#       root, the image's own user, CODEX_HOME on a tmpfs;
+#       agentry-dockerimages#53), and fail unless the user is not root,
+#       `codex --version` prints source.env's version, Codex writes to
+#       CODEX_HOME, LICENSE, NOTICE, the release record and the signature
+#       bundle are present, no file is setuid or setgid, the binary is static,
+#       its SHA-256 is the release record's, and it verifies again against
+#       OpenAI's signature with build/agentry-codex/verify.sh. PLATFORM asks
+#       for, and checks, one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -87,8 +105,9 @@
 # Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image,
 # --files-image, --typst-image and --clamav-db need a container runtime
 # instead (--files-image and --typst-image one that takes docker's run flags
-# for the hardening), and --typst-image also python3 and network to build its
-# strace helper.
+# for the hardening), --typst-image also python3 and network to build its
+# strace helper, and --codex-image also file, cosign and network to reach
+# Sigstore.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -129,7 +148,7 @@ checkScripts() {
 			bad=1
 		}
 	done
-	shellcheck scripts/*.sh build/agentry-files/tika-app build/typst/fetch.sh || bad=1
+	shellcheck scripts/*.sh build/agentry-files/tika-app build/typst/fetch.sh build/agentry-codex/fetch.sh build/agentry-codex/verify.sh || bad=1
 	return "$bad"
 }
 
@@ -734,9 +753,173 @@ EOF
 	return "$bad"
 }
 
+CODEX_CTX=build/agentry-codex
+
+# checkCodex holds the Codex image's context to its pins: source.env names a
+# version, its tag, a commit and a SHA-256 for each architecture's tarball and
+# for LICENSE and NOTICE; verify.sh pins OpenAI's release workflow and GitHub's
+# issuer; fetch.sh verifies the binary and runs the three negative controls; and the
+# Dockerfile runs fetch.sh (agentry-dockerimages#53). The greps match the
+# scripts' own text, `$` and all.
+# shellcheck disable=SC2016
+checkCodex() {
+	local bad=0 key val
+	(
+		# shellcheck source=/dev/null
+		. "$CODEX_CTX/source.env"
+		b=0
+		[[ "${CODEX_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$CODEX_CTX/source.env: CODEX_VERSION is not a release version: ${CODEX_VERSION:-}"
+			b=1
+		}
+		[ "${CODEX_TAG:-}" = "rust-v${CODEX_VERSION:-}" ] || {
+			echo "$CODEX_CTX/source.env: CODEX_TAG ${CODEX_TAG:-} is not rust-v${CODEX_VERSION:-}"
+			b=1
+		}
+		[[ "${CODEX_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+			echo "$CODEX_CTX/source.env: CODEX_COMMIT is not a commit: ${CODEX_COMMIT:-}"
+			b=1
+		}
+		for key in CODEX_SHA256_AMD64 CODEX_SHA256_ARM64 CODEX_LICENSE_SHA256 CODEX_NOTICE_SHA256; do
+			val="${!key:-}"
+			[[ "$val" =~ ^[0-9a-f]{64}$ ]] || {
+				echo "$CODEX_CTX/source.env: $key is not a SHA-256: $val"
+				b=1
+			}
+		done
+		[ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$CODEX_CTX/source.env: PLATFORMS is not linux/amd64,linux/arm64: ${PLATFORMS:-}"
+			b=1
+		}
+		exit "$b"
+	) || bad=1
+	if ! grep -qF -- '--certificate-identity "https://github.com/openai/codex/.github/workflows/rust-release.yml@refs/tags/$tag"' "$CODEX_CTX/verify.sh" ||
+		! grep -qF -- '--certificate-oidc-issuer https://token.actions.githubusercontent.com' "$CODEX_CTX/verify.sh" ||
+		! grep -qF -- '--certificate-github-workflow-sha "$commit"' "$CODEX_CTX/verify.sh"; then
+		echo "$CODEX_CTX/verify.sh: does not pin OpenAI's release workflow, GitHub's issuer and the commit"
+		bad=1
+	fi
+	if [ "$(grep -c '^refuse "' "$CODEX_CTX/fetch.sh")" != 3 ] ||
+		! grep -q '^sh "\$verify" "\$out/codex" "\$out/codex.sigstore" "\$CODEX_TAG" "\$CODEX_COMMIT"$' "$CODEX_CTX/fetch.sh"; then
+		echo "$CODEX_CTX/fetch.sh: does not verify the binary and run the three negative controls"
+		bad=1
+	fi
+	if ! grep -q '^RUN sh /agentry/fetch.sh ' "$CODEX_CTX/Dockerfile"; then
+		echo "$CODEX_CTX/Dockerfile: does not run fetch.sh"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# codexImage runs a built agentry-codex the way the CLI's hardened agent
+# container runs a harness (agentry-cli pkg/runner/engine hardening): no
+# network, every capability dropped, no new privileges, a read-only root, the
+# image's own user, a tmpfs on its home, which is CODEX_HOME. It fails unless that user is not
+# root, `codex --version` prints source.env's version, Codex can write its
+# CODEX_HOME there, LICENSE, NOTICE and the release record are in the image,
+# no file is setuid or setgid, the binary is static, its SHA-256 is the
+# release record's, and it verifies again, with cosign on this machine and
+# the context's verify.sh, against the bundle the image carries. PLATFORM asks
+# for, and checks, one architecture. Needs docker (or CONTAINER), file and
+# cosign. The sh -c scripts expand inside the container.
+# shellcheck disable=SC2016
+codexImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id sum bad=0
+	command -v cosign >/dev/null || {
+		echo "FAIL --codex-image needs cosign"
+		return 1
+	}
+	# shellcheck source=/dev/null
+	. "$CODEX_CTX/source.env"
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	local run=("$runtime" run --rm --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /tmp:mode=1777 --tmpfs /home/codex:mode=1777
+		--pids-limit 256 --memory 1g)
+	if [ -n "${PLATFORM:-}" ]; then
+		run+=(--platform "$PLATFORM")
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --entrypoint /bin/uname "$ref" -m)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+	id=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u)
+	if [ "$id" = 0 ] || [ -z "$id" ]; then
+		echo "FAIL the image runs as uid '${id}', not a user of its own"
+		bad=1
+	else
+		echo "ok   runs as uid $id"
+	fi
+	got=$("${run[@]}" "$ref" --version 2>&1) || got="(failed) $got"
+	if [ "$got" = "codex-cli $CODEX_VERSION" ]; then
+		echo "ok   codex --version: $got, with no network and a read-only root"
+	else
+		echo "FAIL codex --version: $got (want codex-cli $CODEX_VERSION)"
+		bad=1
+	fi
+	# Codex makes its helper links under CODEX_HOME at start (tmp/, absent
+	# from a fresh tmpfs until it does) and reads its configuration there;
+	# both must work on the tmpfs, with nothing needing the read-only root.
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test "$CODEX_HOME" = /home/codex && codex features list >/dev/null && test -d "$CODEX_HOME/tmp"'; then
+		echo "ok   CODEX_HOME is /home/codex, and Codex writes to it and reads its configuration on the tmpfs"
+	else
+		echo "FAIL Codex could not write to or read from CODEX_HOME on the tmpfs"
+		bad=1
+	fi
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/licenses/codex/LICENSE && test -s /usr/share/licenses/codex/NOTICE && test -s /etc/agentry/codex/release && test -s /etc/agentry/codex/codex.sigstore'; then
+		echo "ok   LICENSE, NOTICE, the release record and the signature bundle are in the image"
+	else
+		echo "FAIL LICENSE, NOTICE, the release record or the signature bundle is missing"
+		bad=1
+	fi
+	local suid f
+	if ! suid=$("${run[@]}" --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/codex/release >"$out/release"
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/codex/codex.sigstore >"$out/codex.sigstore"
+	"${run[@]}" --entrypoint /bin/cat "$ref" /usr/local/bin/codex >"$out/codex"
+	echo "release:"
+	sed 's/^/  /' "$out/release"
+	if file "$out/codex" | grep -q 'static'; then
+		echo "ok   the binary is static"
+	else
+		echo "FAIL the binary is not static: $(file -b "$out/codex")"
+		bad=1
+	fi
+	sum=$(sha256sum "$out/codex" | cut -d' ' -f1)
+	if grep -qx "binary_sha256=$sum" "$out/release" && grep -qx "version=$CODEX_VERSION" "$out/release"; then
+		echo "ok   the binary's SHA-256 is the release record's ($sum)"
+	else
+		echo "FAIL the binary's SHA-256 $sum or the version is not the release record's"
+		bad=1
+	fi
+	if sh "$CODEX_CTX/verify.sh" "$out/codex" "$out/codex.sigstore" "$CODEX_TAG" "$CODEX_COMMIT"; then
+		echo "ok   the binary in the image verifies as openai/codex rust-release.yml at $CODEX_TAG ($CODEX_COMMIT)"
+	else
+		echo "FAIL the binary in the image does not verify against OpenAI's signature"
+		bad=1
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -771,6 +954,10 @@ fetchlicence checkTypst
 fetchdup checkTypst
 fonts checkTypst
 designfonts checkTypst
+codexsha checkCodex
+codextag checkCodex
+codexverify checkCodex
+codexcontrol checkCodex
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -798,6 +985,10 @@ breakCase() {
 	fetchdup) grep -m1 '^fonts/' build/typst/fetch.tsv >x && cat x >>build/typst/fetch.tsv && rm x ;;
 	fonts) printf '# none\n\n' >build/typst/fixtures/fonts.txt ;;
 	designfonts) sed -i '/^Noto /!{/^#/!d}' build/typst/fixtures/fonts.txt ;;
+	codexsha) sed -i 's/^CODEX_SHA256_ARM64=.*/CODEX_SHA256_ARM64=latest/' build/agentry-codex/source.env ;;
+	codextag) sed -i 's/^CODEX_TAG=.*/CODEX_TAG=latest/' build/agentry-codex/source.env ;;
+	codexverify) sed -i '/--certificate-github-workflow-sha/d' build/agentry-codex/verify.sh ;;
+	codexcontrol) sed -i '0,/^refuse "/s//: refuse "/' build/agentry-codex/fetch.sh ;;
 	esac
 }
 
@@ -852,6 +1043,13 @@ case "${1:-}" in
 	}
 	typstImage "$2"
 	;;
+--codex-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --codex-image <ref>" >&2
+		exit 2
+	}
+	codexImage "$2"
+	;;
 --clamav-db)
 	if [ $# -ne 3 ] || [ ! -d "$2" ]; then
 		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
@@ -861,7 +1059,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac

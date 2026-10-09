@@ -28,6 +28,10 @@ One more is needed only to build `agentry-unsafe-kali`:
 `agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
 And one only to build `agentry-typst`: `agentry-rust-alpine:1.98.1-alpine3.22`
 (`rust:1.98.1-alpine3.22`).
+And one only to build `agentry-codex`: `agentry-cosign:v3.1.3`
+(`ghcr.io/sigstore/cosign/cosign:v3.1.3`), whose binary verifies OpenAI's
+signature on the Codex release in the build's fetch stage
+([below](#the-codex-image)).
 
 `images.tsv` is the manifest: one tab-separated row per image, with our
 name, the upstream ref, the upstream digest, the kind and the role. A `build`
@@ -114,6 +118,10 @@ The `typst` workflow likewise creates `agentry-typst`, which the runner image
 copies from and so must need no login, and its build-time base
 `agentry-rust-alpine`.
 
+The `codex` workflow creates `agentry-codex`, which the CLI pulls for a
+ChatGPT model sign-in and so must need no login, and its build-time base
+`agentry-cosign`.
+
 ## Repointing the images
 
 The CLI's defaults are tags, not digests. An operator who wants their own
@@ -144,7 +152,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -160,7 +168,7 @@ pulls no image and needs no credentials.
 
 The `images` workflow runs the same steps, then mirrors every `mirror` row
 and builds every context in `build/` except those built per architecture,
-which have their own workflows (`unsafe-kali`, `files`, `typst`). It is started by hand, and it
+which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`). It is started by hand, and it
 logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
 secrets are set.
 
@@ -390,6 +398,115 @@ cosign verify ghcr.io/blaktron/agentry-clamav-db@<digest> \
 The signature databases are Cisco Talos's. Each CVD carries its licence, the
 GNU GPL version 2, as `COPYING` inside it, and the bundle passes each CVD on
 unmodified.
+
+## The Codex image
+
+`agentry-codex` is the Codex harness image: OpenAI's Codex CLI, which the CLI's
+`codex` container adapter runs for a ChatGPT model sign-in, and on an OpenAI
+key when a policy picks it (agentry-notes `plans/model-sign-ins.md` §4.3, D5,
+D11; agentry-dockerimages#53; the adapter is agentry-cli#739). Model sign-ins
+are local runs only, so hosted runs never pull it.
+
+Nothing is compiled. `build/agentry-codex/` takes OpenAI's release binary,
+`codex-<arch>-unknown-linux-musl` from the GitHub release `CODEX_TAG`
+(`source.env`), and puts it, unmodified, on our mirror of `alpine:3.22`. Alpine
+rather than `scratch` because the model sign-in's token reaches Codex through
+a command that reads a file (`cat`; plan D9).
+
+**What the build holds the binary to.** The fetch stage (`fetch.sh`):
+
+1. holds the release tarball to its SHA-256 in `source.env`, and to holding
+   the one binary;
+2. verifies the binary (OpenAI signs the binary, not the tarball) against its
+   `.sigstore` bundle with `verify.sh`: the signer must be
+   `https://github.com/openai/codex/.github/workflows/rust-release.yml@refs/tags/<CODEX_TAG>`,
+   as `https://token.actions.githubusercontent.com` certifies it, run by a
+   push in `openai/codex` at `CODEX_COMMIT`, with the signature in Rekor;
+3. proves, on every build, that the same verifier refuses a copy of the
+   binary with one byte changed, the genuine binary under another tag's
+   identity, and the genuine binary at another commit, each for that reason
+   (cosign's own message), so a refusal for another reason, such as Sigstore
+   not answering, does not count;
+4. fetches `LICENSE` and `NOTICE` at `CODEX_COMMIT`, each held to its SHA-256.
+
+Any failure stops the build. The cosign that verifies is Sigstore's own
+image, pinned by digest (`agentry-cosign`, build-time only); the `codex`
+workflow checks Sigstore's signature on that digest before it mirrors it.
+Only its binary is copied, and only into the fetch stage.
+
+**The image.**
+
+| Path | What |
+|---|---|
+| `/usr/local/bin/codex` | the binary, static (musl); the entrypoint |
+| `/etc/agentry/codex/release` | the version, tag, commit, asset and binary SHA-256 and the signer |
+| `/etc/agentry/codex/codex.sigstore` | OpenAI's bundle, so the binary in the image can be verified again |
+| `/usr/share/licenses/codex/` | Codex's `LICENSE` and `NOTICE` |
+
+It runs as uid 10001 (`codex`), never root. `CODEX_HOME` is the user's home,
+`/home/codex`, which the runner mounts as a tmpfs over a read-only root, as it
+does for docker-agent's home. It is the home itself because Codex does not
+create a missing `CODEX_HOME` (with a tmpfs over the home, a directory inside
+it would be gone), and it is not under `/tmp`, where Codex refuses its helper
+links. Without a writable `CODEX_HOME` Codex still prints its version, with a
+warning, but cannot keep its state. No `bwrap` is installed. Codex's own
+sandbox code is in the binary, but it starts only for a shell or patch tool,
+which the adapter does not offer (plan §3 I1, the adapter's to keep), and
+Codex's start-up check only warns (plan D5).
+
+**The check.** `scripts/check.sh --codex-image <ref>` runs the image the way
+the CLI runs a harness: no network, every capability dropped, no new
+privileges, a read-only root, the image's own user, a tmpfs on its home.
+It fails unless the user is not root, `codex --version` prints the pinned
+version, Codex writes to and reads its configuration from `CODEX_HOME`, the licence files, the release
+record and the bundle are present, no file is setuid or setgid, the binary
+is static, its SHA-256 is the release record's, and it verifies again against
+OpenAI's signature (it needs a container runtime, `cosign`, `file`, and
+network to reach Sigstore). It ran
+against a local amd64 build on 2026-10-09 with every line `ok`.
+
+**Publishing and signing.** The `codex` workflow (manual dispatch, from `main`
+only) follows the files image: native amd64 and arm64 builds, the check on
+each before its push, the digests joined into one tag, the joined digest
+checked again, signed with cosign, keyless, as the workflow, and verified.
+The tag is the Codex version, the UTC date and the run number
+(`0.162.0-2026.10.09.1`). The packages `agentry-codex` and `agentry-cosign`
+are created by the workflow in this public repository, so they are public.
+The `agentry-codex` row in `images.tsv` then takes the tag and its digest,
+and the CLI pins that digest as its default Codex harness image. Verify a
+published digest with:
+
+```
+cosign verify ghcr.io/blaktron/agentry-codex@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/codex.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+and the Codex binary inside it against OpenAI's signature with
+`scripts/check.sh --codex-image ghcr.io/blaktron/agentry-codex@<digest>`.
+
+**Bumping Codex.** By hand; nothing moves it on its own. OpenAI releases a
+stable Codex every few days, and a bump is worth it for a fix the adapter
+needs, not for every release.
+
+1. Pick a stable release (`gh release list -R openai/codex --exclude-pre-releases`).
+2. In `build/agentry-codex/source.env`, set `CODEX_VERSION` and `CODEX_TAG`;
+   `CODEX_COMMIT` to the commit the tag names
+   (`gh api repos/openai/codex/git/ref/tags/<tag>`, then the tag object's
+   target); `CODEX_SHA256_AMD64` and `CODEX_SHA256_ARM64` to the SHA-256 of
+   each `codex-<arch>-unknown-linux-musl.tar.gz` (`gh release view <tag> -R
+   openai/codex --json assets` lists each asset's digest; check one by
+   download); and the two licence hashes if `LICENSE` or `NOTICE` changed at
+   that commit. Update the release line in `NOTICE`.
+3. Build locally (`scripts/build.sh` needs the mirrors; or `docker build`
+   with the two bases by digest) and run `scripts/check.sh --codex-image`.
+4. Merge, promote, dispatch the `codex` workflow from `main`, and record its
+   row in `images.tsv` in a second pull request.
+5. **Re-record the model sign-in conformance on the new version** before the
+   CLI's default moves: the codex container adapter's recordings and the
+   checks that no built-in tool is offered (`apply_patch`, `tool_search`,
+   shell; plan §3 I1), since a Codex release can switch a tool on. Only then
+   does the CLI pin the new digest.
 
 ## Building Docker Agent from source
 

@@ -163,3 +163,28 @@ see build/agentry-files/archives/LICENSE. ZIP and TAR fixtures are ours.
 The signature databases the clamav-db workflow publishes are Cisco Talos's
 ClamAV databases (main.cvd, daily.cvd, bytecode.cvd), passed on unmodified.
 Each carries its licence, the GNU GPL version 2, as COPYING inside it.
+
+## agentry-codex
+
+    Upstream:   https://github.com/openai/codex
+    Release:    rust-v0.162.0 (commit c1382380de69521303b416720a52f42d51af6248)
+    Licence:    Apache-2.0
+    Our image:  agentry-codex
+    Context:    build/agentry-codex/
+
+OpenAI's Codex CLI, copyright 2025 OpenAI, is redistributed as OpenAI
+releases it: the `codex-<arch>-unknown-linux-musl` binary from the GitHub
+release, unmodified, verified against OpenAI's sigstore signature. Licensed
+under the Apache License, Version 2.0. Upstream's `LICENSE` and `NOTICE`
+(which credits Ratatui, MIT, copyright Florian Dehau and the Ratatui
+developers) are shipped in the image under `/usr/share/licenses/codex/`.
+The release carries no bundle of the licences of the crates linked into the
+binary, and none is added here. We make no change to the binary, so
+Apache-2.0 §4(b) has nothing to state; the image adds only a user, an
+environment variable, the release record and the signature bundle. Apache-2.0
+§3 grants no trademark licence: nothing here is presented as an OpenAI
+product, and "Codex" is used only to identify the upstream component.
+
+The build's fetch stage copies the `cosign` binary from Sigstore's own image
+(`ghcr.io/sigstore/cosign/cosign`, Apache-2.0) to verify that signature; it
+is not in the published image.
