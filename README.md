@@ -23,7 +23,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
 `agentry-harness-alpine:3.23` (`alpine:3.23`) and
-`agentry-harness-golang:1.27.0-alpine3.23` (`golang:1.27.0-alpine3.23`).
+`agentry-harness-golang:1.27.2-alpine3.23` (`golang:1.27.2-alpine3.23`).
 One more is needed only to build `agentry-unsafe-kali`:
 `agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
 And one only to build `agentry-typst`: `agentry-rust-alpine:1.98.1-alpine3.22`
