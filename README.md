@@ -20,7 +20,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
-| `agentry-hostlink` (no tag yet) | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
+| `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -622,10 +622,17 @@ cosign verify ghcr.io/blaktron/agentry-hostlink@<digest> \
 
 The `agentry-hostlink` row in `images.tsv` then takes the tag and its
 digest, and the CLI pins that digest (agentry-cli#861). A rebuild is a new
-tag and a new digest, never an overwrite. On the workstation (amd64), the
-image built on 2026-10-11 holds `openssh-client-default-10.0_p1-r10`,
+tag and a new digest, never an overwrite.
+
+The first build is `ghcr.io/blaktron/agentry-hostlink:2026.10.11.1@sha256:66f9fc5ce5223278676faad73d9cde005784ea6a35a64258ca47d1c662c0b099`
+(run 38171382190, 2026-10-11): amd64 `d4dd23ae…` and arm64 `cf116703…`.
+Each architecture, then the joined digest, passed every line of the check.
+The signature verified from the workstation the same day, an anonymous
+manifest fetch answered 200, and the check passed again there against the
+published digest. Its packages: `openssh-client-default-10.0_p1-r10`,
 `openssh-client-common-10.0_p1-r10` and `openssh-keygen-10.0_p1-r10`
-(OpenSSH 10.0p2, OpenSSL 3.5.8).
+(OpenSSH 10.0p2, OpenSSL 3.5.8). The native images report 12,845,024 bytes
+(amd64) and 13,370,036 bytes (arm64) in the build jobs' Docker size reports.
 
 ## Building Docker Agent from source
 
