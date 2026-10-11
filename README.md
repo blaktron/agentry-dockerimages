@@ -19,8 +19,8 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
-| `agentry-hostlink` (no tag yet; [below](#the-host-link-image)) | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
+| `agentry-hostlink` (no tag yet) | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -543,8 +543,9 @@ OpenSSH, in an image of its own.
 | `openssh-keygen` | `ssh-keygen` | a key's fingerprint, a `known_hosts` lookup |
 
 It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
-those packages and their dependencies (libraries; `apk`'s world is the
-base's plus those three) and nothing else. Alpine's `openssh-keysign`, the
+those packages and their dependencies (libedit, ncurses' library and its
+terminfo data; `apk`'s world is the base's plus those three) and nothing
+else. Alpine's `openssh-keysign`, the
 client's one setuid program, is not installed, and the image has no setuid
 or setgid file. `/etc/agentry/hostlink/packages` lists the versions apk
 resolved, one `name-version` a line, for the receipt. A password reaches
@@ -554,13 +555,22 @@ OpenSSH has, so no `sshpass` is installed.
 It holds no runner binary: the CLI adds its own in an offline layer `FROM`
 the pinned digest, as it does for the files image (agentry-cli#861).
 
+`openssh-client-common` also holds `scp`, `ssh-add`, `ssh-agent`,
+`ssh-copy-id` and `ssh-pkcs11-helper`, which the host link does not use. The
+image itself forwards nothing: it has no agent socket and no configuration.
+No forwarding of any kind (the plan's invariant 5) is held by the runner's
+`ssh` arguments and tested there, not here; the CLI's minimize step can drop
+the programs its catalogue does not name.
+
 **The user.** The image runs as uid 10001 (`hostlink`, home `/home/hostlink`),
 never root. `ssh` will not start for a uid that has no passwd entry ("No
 user exists for uid …"), so a host link run as another uid needs a passwd
 line for that uid bound in. `ssh` also holds a private key file to mode 0600
 only when the uid running it owns the file. A key the runner writes 0600 as
 the person is therefore readable by a host link run as the person's uid with
-a passwd line, and not by uid 10001. The check below proves both ways work;
+a passwd line, and not by uid 10001. The check below proves both ways work
+(uid 10001 reads a 0644 copy of the key it makes, the invoking uid its own
+0600 one);
 the runner picks one at agentry-cli#861 (register entry DR-91).
 
 **The check.** `scripts/check.sh --hostlink-image <ref>` runs the image the
@@ -577,13 +587,18 @@ check. It fails unless:
 - no file is setuid or setgid;
 - `ssh -V` runs, and `sftp`, `ssh-keyscan` and `ssh-keygen` are present;
 - `ssh-keyscan` reads the server's key, and it is the key made for it;
-- `ssh` logs in with a key and runs a command, and opens a remote
-  pseudo-terminal with `-tt`;
+- `ssh` logs in with a key and runs a command, opens a remote
+  pseudo-terminal with `-tt`, and runs what is sent over stdin to a login
+  shell there;
+- `ssh` unlocks a passphrase-protected key through `SSH_ASKPASS`;
+- on a second port, `ssh-keyscan` reads the key as `[target]:2222`, and `ssh`
+  checks it under `HostKeyAlias`, as it will through the relay, where the
+  address it dials is not the host's;
 - `sftp` copies a file to the server and back unchanged;
 - `ssh` logs in with a password through `SSH_ASKPASS`;
 - a changed host key is refused ("REMOTE HOST IDENTIFICATION HAS CHANGED"),
-  and so is an unknown one with `StrictHostKeyChecking=yes`, each before any
-  command runs;
+  and so is an unknown one with `StrictHostKeyChecking=yes` ("No ED25519 host
+  key is known"), each before any command runs;
 - `ssh` runs as the invoking uid given a passwd line for it, with that uid's
   own 0600 key.
 

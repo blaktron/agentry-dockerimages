@@ -20,11 +20,17 @@
 #   openssh-keygen           ssh-keygen (a key's fingerprint, a known_hosts
 #                            lookup)
 #
+# openssh-client-common also holds scp, ssh-add, ssh-agent, ssh-copy-id and
+# ssh-pkcs11-helper. The host link uses none of them, and no forwarding of
+# any kind (plan invariant 5) is the runner's ssh argv to hold; the CLI's
+# minimize step can drop what its catalogue does not name.
+#
 # A password reaches ssh through SSH_ASKPASS with SSH_ASKPASS_REQUIRE=force,
 # which this OpenSSH has; no sshpass is installed.
 #
 # PACKAGES is the one list of what is installed: apk brings their dependencies
-# (libraries, no setuid program), nothing else is added. Alpine's
+# (libedit, ncurses' library and terminfo data; no setuid program), nothing
+# else is added. Alpine's
 # openssh-keysign, the one setuid part of the client, is not installed.
 # /etc/agentry/hostlink/packages records the version apk resolved for each of
 # PACKAGES, one `name-version` a line, so a receipt can name them.

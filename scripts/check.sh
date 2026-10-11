@@ -106,9 +106,11 @@
 #       network to build) on an internal network with no route out. It fails
 #       unless the user is uid 10001, the package record names each of
 #       PACKAGES, apk's world is the base's plus PACKAGES, no file is setuid
-#       or setgid, ssh-keyscan reads the server's key, ssh logs in with a key
-#       and with a password through SSH_ASKPASS, runs a command and opens a
-#       remote pseudo-terminal, sftp copies a file there and back, a changed
+#       or setgid, ssh-keyscan reads the server's key (on port 22 and 2222),
+#       ssh logs in with a key, with a passphrase-protected key and with a
+#       password through SSH_ASKPASS, runs a command, opens a remote
+#       pseudo-terminal and drives a login shell over stdin, checks a key
+#       under HostKeyAlias on port 2222, sftp copies a file there and back, a changed
 #       and an unknown host key are each refused before any command runs,
 #       and ssh runs as the invoking uid given a passwd line for it. PLATFORM
 #       asks for, and checks, one architecture.
@@ -940,12 +942,12 @@ HOSTLINK_CTX=build/agentry-hostlink
 
 # hostlinkPackages prints the Dockerfile's PACKAGES, one a line.
 hostlinkPackages() {
-	sed -n 's/^ARG PACKAGES="\(.*\)"$/\1/p' "$HOSTLINK_CTX/Dockerfile" | tr ' ' '\n' | sed '/^$/d'
+	sed -n 's/^ARG PACKAGES="\(.*\)"$/\1/p' "$HOSTLINK_CTX/Dockerfile" | tr -s ' ' '\n' | sed '/^$/d'
 }
 
 # checkHostlink holds the host link image's context to its contract: the
-# OpenSSH client's packages and nothing else, never the setuid
-# openssh-keysign, and a non-root user (plan runtime-hosts.md D5;
+# OpenSSH client's three packages and nothing else (never the setuid
+# openssh-keysign, never a server), and a non-root user (plan runtime-hosts.md D5;
 # agentry-dockerimages#71).
 checkHostlink() {
 	local bad=0 p n=0
@@ -956,9 +958,9 @@ checkHostlink() {
 			echo "$HOSTLINK_CTX/Dockerfile: PACKAGES installs openssh-keysign, the client's setuid helper"
 			bad=1
 			;;
-		openssh-*) ;;
+		openssh-client-default | openssh-client-common | openssh-keygen) ;;
 		*)
-			echo "$HOSTLINK_CTX/Dockerfile: PACKAGES installs $p, which is not part of the OpenSSH client"
+			echo "$HOSTLINK_CTX/Dockerfile: PACKAGES installs $p, which is not one of the OpenSSH client's three packages"
 			bad=1
 			;;
 		esac
@@ -988,9 +990,11 @@ checkHostlink() {
 # server's key, ssh logs in with a key and with a password through
 # SSH_ASKPASS, runs a command, opens a remote pseudo-terminal, sftp copies a
 # file both ways, a changed or unknown host key is refused before any
-# command runs, and ssh runs as another uid given a passwd line for it.
+# command runs, and ssh runs as another uid given a passwd line for it;
+# with a passphrase-protected key, a login shell over stdin, and a second
+# port whose key is checked under HostKeyAlias, as through the relay.
 hostlinkImage() {
-	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid base p v out
+	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid base p out
 	checkHostlink || return 1
 	local tag="$$-$RANDOM" dir net sshd helper
 	net="agentry-check-hostlink-$tag"
@@ -1044,9 +1048,18 @@ hostlinkImage() {
 		echo "FAIL the record has $(wc -l <"$dir/packages") lines for $(hostlinkPackages | wc -l) packages"
 		bad=1
 	fi
-	read -r base < <(awk -F'=' '$1 == "ALPINE_IMAGE" { print $2 }' "$HOSTLINK_CTX/bases.env")
-	read -r p v < <(awk -F'\t' -v u="$base" '!/^[[:space:]]*#/ && $2 == u { print $1, $3; exit }' "$MANIFEST")
-	base="${REGISTRY:-ghcr.io/blaktron}/$p:${base##*:}@$v"
+	# The base as scripts/build.sh passes it (its ourRef): our mirror's tag
+	# and the digest images.tsv pins.
+	local upstream mirrored digest
+	read -r upstream < <(awk -F'=' '$1 == "ALPINE_IMAGE" { print $2 }' "$HOSTLINK_CTX/bases.env") || {
+		echo "FAIL $HOSTLINK_CTX/bases.env names no ALPINE_IMAGE"
+		return 1
+	}
+	read -r mirrored digest < <(awk -F'\t' -v u="$upstream" '!/^[[:space:]]*#/ && $2 == u { print $1, $3; exit }' "$MANIFEST") || {
+		echo "FAIL $MANIFEST has no row for $upstream"
+		return 1
+	}
+	base="${REGISTRY:-ghcr.io/blaktron}/$mirrored:${upstream##*:}@$digest"
 	{
 		"$runtime" run --rm "${plat[@]}" --network none --entrypoint /bin/cat "$base" /etc/apk/world
 		hostlinkPackages
@@ -1092,27 +1105,38 @@ hostlinkImage() {
 	# The server: our base mirror with OpenSSH's server, built here (it needs
 	# network to build), on an internal network the host link alone joins.
 	# Its keys and the client's are made fresh for this check.
+	# The password is also the passphrase of the second client key.
+	head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$dir/password"
+	chmod 644 "$dir/password"
 	printf 'FROM %s\nRUN apk add --no-cache openssh-server openssh-sftp-server openssh-keygen\n' "$base" |
 		"$runtime" build -q "${plat[@]}" -t "$helper" - >/dev/null
+	# shellcheck disable=SC2016 # expanded by the helper's shell
 	"$runtime" run --rm "${plat[@]}" --network none --security-opt label=disable -v "$dir:/w" --entrypoint /bin/sh "$helper" -c '
 		set -e
 		ssh-keygen -q -t ed25519 -N "" -C check -f /w/id
 		ssh-keygen -q -t ed25519 -N "" -C target -f /w/host_key
 		ssh-keygen -q -t ed25519 -N "" -C other -f /w/other_key
-		chown '"$(id -u):$(id -g)"' /w/id /w/id.pub /w/host_key /w/host_key.pub /w/other_key /w/other_key.pub'
+		ssh-keygen -q -t ed25519 -N "$(cat /w/password)" -C locked -f /w/locked
+		chown '"$(id -u):$(id -g)"' /w/id /w/id.pub /w/host_key /w/host_key.pub /w/other_key /w/other_key.pub /w/locked /w/locked.pub'
 	# ssh holds a key file to 0600 only when the user running it owns it, so
 	# the image's user reads a 0644 copy and the invoking uid its own 0600.
+	# Everything here is made for this check and removed with it; the folder
+	# is readable to the image's user, and so to others on this machine.
 	cp "$dir/id" "$dir/id600"
 	chmod 600 "$dir/id600"
-	chmod 644 "$dir/id"
+	chmod 644 "$dir/id" "$dir/locked"
 	chmod 755 "$dir"
-	head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$dir/password"
 	printf '#!/bin/sh\nexec cat /cfg/password\n' >"$dir/askpass"
 	chmod 755 "$dir/askpass"
 	printf 'target %s\n' "$(cut -d' ' -f1,2 "$dir/host_key.pub")" >"$dir/known_hosts"
 	printf 'target %s\n' "$(cut -d' ' -f1,2 "$dir/other_key.pub")" >"$dir/changed_hosts"
 	: >"$dir/empty_hosts"
-	printf 'hostlink-payload %s\n' "$(cat "$dir/password")" >"$dir/payload"
+	# The host link reaches a relay, not the host: the key is looked up under
+	# the name the person gave (HostKeyAlias), whatever address and port ssh
+	# dials.
+	printf 'server.example %s\n' "$(cut -d' ' -f1,2 "$dir/host_key.pub")" >"$dir/alias_hosts"
+	printf '[target]:2222 %s\n' "$(cut -d' ' -f1,2 "$dir/host_key.pub")" >"$dir/port_hosts"
+	head -c 4096 /dev/urandom | od -An -tx1 >"$dir/payload"
 	printf 'put /cfg/payload payload\nget payload /tmp/back\n' >"$dir/batch"
 	printf 'check:x:%s:%s::/tmp:/sbin/nologin\n' "$(id -u)" "$(id -g)" >"$dir/passwd"
 	chmod 644 "$dir/password" "$dir/payload" "$dir/batch" "$dir/passwd" "$dir"/*_hosts
@@ -1126,8 +1150,10 @@ hostlinkImage() {
 		echo "agent:$(cat /w/password)" | chpasswd >/dev/null
 		install -m 600 /w/host_key /etc/ssh/agentry_host_key
 		install -d -o agent -m 700 /home/agent/.ssh
-		install -o agent -m 600 /w/id.pub /home/agent/.ssh/authorized_keys
-		exec /usr/sbin/sshd -D -e -h /etc/ssh/agentry_host_key -o PasswordAuthentication=yes -o KbdInteractiveAuthentication=no' >/dev/null
+		cat /w/id.pub /w/locked.pub >/home/agent/.ssh/authorized_keys
+		chown agent /home/agent/.ssh/authorized_keys
+		chmod 600 /home/agent/.ssh/authorized_keys
+		exec /usr/sbin/sshd -D -e -p 22 -p 2222 -h /etc/ssh/agentry_host_key -o PasswordAuthentication=yes -o KbdInteractiveAuthentication=no' >/dev/null
 
 	# ssh keeps the first value it is given for an option, so each call
 	# names its own key and its own known_hosts after these.
@@ -1146,7 +1172,7 @@ hostlinkImage() {
 		echo "ok   ssh-keyscan reads the server's key ($(cut -d' ' -f2 <<<"$scanned"))"
 	else
 		echo "FAIL ssh-keyscan: got \"$scanned\""
-		"$runtime" logs "$sshd" 2>&1 | tail -5 | sed 's/^/     /'
+		"$runtime" logs "$sshd" 2>&1 | tail -5 | sed 's/^/     /' || true
 		bad=1
 	fi
 
@@ -1188,6 +1214,45 @@ hostlinkImage() {
 		bad=1
 	fi
 
+	# A login shell on a pseudo-terminal, driven over stdin, as a shell
+	# session is; the remote shell does the arithmetic, so the echoed input
+	# alone cannot pass.
+	# shellcheck disable=SC2016 # expanded by the remote shell
+	if out=$(printf 'echo shell-$((6 * 7))\nexit\n' | "${hl[@]}" -i --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" "${key[@]}" -tt agent@target 2>"$dir/tty.err") &&
+		[[ "$out" == *shell-42* ]]; then
+		echo "ok   a login shell on a pseudo-terminal runs what is sent over stdin"
+	else
+		echo "FAIL a login shell over stdin: ${out//$'\r'/} $(cat "$dir/tty.err")"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --env SSH_ASKPASS=/cfg/askpass --env SSH_ASKPASS_REQUIRE=force --entrypoint /usr/bin/ssh "$ref" \
+		-F /dev/null -o IdentitiesOnly=yes -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes \
+		-o ConnectTimeout=10 -i /cfg/locked -o UserKnownHostsFile=/cfg/known_hosts \
+		-o PreferredAuthentications=publickey agent@target 'echo passphrase-ok' 2>&1) &&
+		[ "$out" = passphrase-ok ]; then
+		echo "ok   ssh unlocks a key's passphrase through SSH_ASKPASS"
+	else
+		echo "FAIL ssh with a passphrase-protected key: $out"
+		bad=1
+	fi
+
+	if scanned=$("${hl[@]}" --entrypoint /usr/bin/ssh-keyscan "$ref" -T 5 -t ed25519 -p 2222 target 2>/dev/null | grep -v '^#') &&
+		[ "$scanned" = "$(cat "$dir/port_hosts")" ]; then
+		echo "ok   ssh-keyscan reads the key on port 2222 as [target]:2222"
+	else
+		echo "FAIL ssh-keyscan -p 2222: got \"$scanned\""
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" -i /cfg/id -o UserKnownHostsFile=/cfg/alias_hosts \
+		-o HostKeyAlias=server.example -p 2222 agent@target 'echo alias-ok' 2>&1) && [ "$out" = alias-ok ]; then
+		echo "ok   ssh on port 2222 checks the key under HostKeyAlias, as through a relay"
+	else
+		echo "FAIL ssh with HostKeyAlias on port 2222: $out"
+		bad=1
+	fi
+
 	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" -i /cfg/id -o UserKnownHostsFile=/cfg/changed_hosts agent@target 'echo hostlink-ran' 2>&1); then
 		echo "FAIL ssh ran a command on a host whose key changed: $out"
 		bad=1
@@ -1201,7 +1266,7 @@ hostlinkImage() {
 	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" -i /cfg/id -o UserKnownHostsFile=/cfg/empty_hosts agent@target 'echo hostlink-ran' 2>&1); then
 		echo "FAIL ssh ran a command on a host whose key is unknown: $out"
 		bad=1
-	elif [[ "$out" == *"Host key verification failed"* ]] && [[ "$out" != *hostlink-ran* ]]; then
+	elif [[ "$out" == *"No ED25519 host key is known for target"* ]] && [[ "$out" != *"HAS CHANGED"* ]] && [[ "$out" != *hostlink-ran* ]]; then
 		echo "ok   an unknown host key is refused before any command"
 	else
 		echo "FAIL an unknown host key failed, but not for that reason: $out"
