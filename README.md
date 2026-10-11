@@ -20,6 +20,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
+| `agentry-hostlink` (no tag yet) | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -123,6 +124,10 @@ The `codex` workflow creates `agentry-codex`, which the CLI pulls for a
 ChatGPT model sign-in and so must need no login, and its build-time base
 `agentry-cosign`.
 
+The `hostlink` workflow creates `agentry-hostlink`, which the CLI pulls for a
+run given a target host and so must need no login. It has no build-time base
+of its own: it is built on `agentry-alpine`.
+
 ## Repointing the images
 
 The CLI's defaults are tags, not digests. An operator who wants their own
@@ -153,7 +158,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, and the files image's fixture list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, the files image's fixture list and the host link image's package list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). `--hostlink-image <ref>` runs a built `agentry-hostlink` hardened against a throwaway OpenSSH server on an internal network ([below](#the-host-link-image)). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -169,7 +174,7 @@ pulls no image and needs no credentials.
 
 The `images` workflow runs the same steps, then mirrors every `mirror` row
 and builds every context in `build/` except those built per architecture,
-which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`). It is started by hand, and it
+which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`, `hostlink`). It is started by hand, and it
 logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
 secrets are set.
 
@@ -519,6 +524,108 @@ needs, not for every release.
    checks that no built-in tool is offered (`apply_patch`, `tool_search`,
    shell; plan §3 I1), since a Codex release can switch a tool on. Only then
    does the CLI pin the new digest.
+
+## The host link image
+
+`agentry-hostlink` holds the OpenSSH client the runner's **host link** uses to
+reach a **target host**, a machine the person names when a run starts
+(agentry-notes `plans/runtime-hosts.md` §4, D3, D5;
+agentry-dockerimages#71). The host link is a runner-owned container behind
+one relay to the host's address and port. It holds the host's credential in
+files bound into it alone and makes the SSH session; the agent never does.
+The runner image stays standard-library only (DR-2), so the client is
+OpenSSH, in an image of its own.
+
+| Package | Gives | Used for |
+|---|---|---|
+| `openssh-client-default` | `ssh` | one-shot commands, and an interactive shell on a remote pseudo-terminal (`ssh -tt`) |
+| `openssh-client-common` | `sftp`, `ssh-keyscan` (and `scp`, `ssh-add`, `ssh-agent`, which come in the same package) | file reads, writes and copies; the key of an unknown host |
+| `openssh-keygen` | `ssh-keygen` | a key's fingerprint, a `known_hosts` lookup |
+
+It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
+those packages and their dependencies (libedit, ncurses' library and its
+terminfo data; `apk`'s world is the base's plus those three) and nothing
+else. Alpine's `openssh-keysign`, the
+client's one setuid program, is not installed, and the image has no setuid
+or setgid file. `/etc/agentry/hostlink/packages` lists the versions apk
+resolved, one `name-version` a line, for the receipt. A password reaches
+`ssh` through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force`, which this
+OpenSSH has, so no `sshpass` is installed.
+
+It holds no runner binary: the CLI adds its own in an offline layer `FROM`
+the pinned digest, as it does for the files image (agentry-cli#861).
+
+`openssh-client-common` also holds `scp`, `ssh-add`, `ssh-agent`,
+`ssh-copy-id` and `ssh-pkcs11-helper`, which the host link does not use. The
+image itself forwards nothing: it has no agent socket and no configuration.
+No forwarding of any kind (the plan's invariant 5) is held by the runner's
+`ssh` arguments and tested there, not here; the CLI's minimize step can drop
+the programs its catalogue does not name.
+
+**The user.** The image runs as uid 10001 (`hostlink`, home `/home/hostlink`),
+never root. `ssh` will not start for a uid that has no passwd entry ("No
+user exists for uid …"), so a host link run as another uid needs a passwd
+line for that uid bound in. `ssh` also holds a private key file to mode 0600
+only when the uid running it owns the file. A key the runner writes 0600 as
+the person is therefore readable by a host link run as the person's uid with
+a passwd line, and not by uid 10001. The check below proves both ways work
+(uid 10001 reads a 0644 copy of the key it makes, the invoking uid its own
+0600 one);
+the runner picks one at agentry-cli#861 (register entry DR-91).
+
+**The check.** `scripts/check.sh --hostlink-image <ref>` runs the image the
+way the runner runs a host link: every capability dropped, no new
+privileges, a read-only root, a tmpfs home, the image's own user, and the
+credentials bound read-only. It starts a throwaway OpenSSH server (our
+`alpine:3.22` mirror with `openssh-server`, built by the check) on an
+internal Docker network with no route out, with keys made fresh for the
+check. It fails unless:
+
+- the user is uid 10001;
+- the package record names each package at a version, and `apk`'s world is
+  the base's plus the three packages;
+- no file is setuid or setgid;
+- `ssh -V` runs, and `sftp`, `ssh-keyscan` and `ssh-keygen` are present;
+- `ssh-keyscan` reads the server's key, and it is the key made for it;
+- `ssh` logs in with a key and runs a command, opens a remote
+  pseudo-terminal with `-tt`, and runs what is sent over stdin to a login
+  shell there;
+- `ssh` unlocks a passphrase-protected key through `SSH_ASKPASS`;
+- on a second port, `ssh-keyscan` reads the key as `[target]:2222`, and `ssh`
+  checks it under `HostKeyAlias`, as it will through the relay, where the
+  address it dials is not the host's;
+- `sftp` copies a file to the server and back unchanged;
+- `ssh` logs in with a password through `SSH_ASKPASS`;
+- a changed host key is refused ("REMOTE HOST IDENTIFICATION HAS CHANGED"),
+  and so is an unknown one with `StrictHostKeyChecking=yes` ("No ED25519 host
+  key is known"), each before any command runs;
+- `ssh` runs as the invoking uid given a passwd line for it, with that uid's
+  own 0600 key.
+
+**Publishing and signing.** The `hostlink` workflow (manual dispatch, from
+`main` only) works as the `files` workflow does:
+- it builds each architecture natively and runs the check on each before
+  pushing it;
+- it joins the pushed digests into one tag named for the UTC date and the
+  run number, refusing a tag that exists;
+- it checks the joined digest again, signs it with cosign, keyless, as the
+  workflow itself, and verifies the signature before it reports the
+  `images.tsv` row.
+
+Verify a published digest with:
+
+```
+cosign verify ghcr.io/blaktron/agentry-hostlink@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/hostlink.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The `agentry-hostlink` row in `images.tsv` then takes the tag and its
+digest, and the CLI pins that digest (agentry-cli#861). A rebuild is a new
+tag and a new digest, never an overwrite. On the workstation (amd64), the
+image built on 2026-10-11 holds `openssh-client-default-10.0_p1-r10`,
+`openssh-client-common-10.0_p1-r10` and `openssh-keygen-10.0_p1-r10`
+(OpenSSH 10.0p2, OpenSSL 3.5.8).
 
 ## Building Docker Agent from source
 
