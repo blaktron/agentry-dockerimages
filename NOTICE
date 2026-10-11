@@ -188,3 +188,14 @@ product, and "Codex" is used only to identify the upstream component.
 The build's fetch stage copies the `cosign` binary from Sigstore's own image
 (`ghcr.io/sigstore/cosign/cosign`, Apache-2.0) to verify that signature; it
 is not in the published image.
+
+## agentry-hostlink
+
+The OpenSSH client (openssh-client-default, openssh-client-common and
+openssh-keygen; SSH-OpenSSH, the licence in OpenSSH's LICENCE file, as
+Alpine packages it) and its dependencies (libedit, BSD-3-Clause, and
+libraries already in the base) are installed from Alpine, unchanged, with
+their own package licences. Nothing is built from source. What we add is
+ours, under MIT: the package record under /etc/agentry/hostlink/ and the
+hostlink user. OpenSSH is a project of OpenBSD; nothing built here is an
+OpenBSD or OpenSSH product.

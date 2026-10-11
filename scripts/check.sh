@@ -31,10 +31,13 @@
 #     issuer and the commit; fetch.sh does not verify the binary and run the
 #     three negative controls; or the Dockerfile does not run fetch.sh
 #     (build/agentry-codex).
+#   - the host link image's PACKAGES names anything but OpenSSH client
+#     packages, or the setuid openssh-keysign, or its Dockerfile does not run
+#     as uid 10001 (build/agentry-hostlink).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
-# --files-image, --typst-image and --codex-image mode, which run the image
-# they name.
+# --files-image, --typst-image, --codex-image and --hostlink-image mode,
+# which run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -94,6 +97,21 @@
 #       its SHA-256 is the release record's, and it verifies again against
 #       OpenAI's signature with build/agentry-codex/verify.sh. PLATFORM asks
 #       for, and checks, one architecture.
+#   scripts/check.sh --hostlink-image <ref>
+#       run a built agentry-hostlink hardened, as the runner runs a host link
+#       (every capability dropped, no new privileges, a read-only root, the
+#       image's own user, the credentials bound read-only; plan
+#       runtime-hosts.md D5, agentry-dockerimages#71), against a throwaway
+#       OpenSSH server (our alpine mirror with openssh-server, which needs
+#       network to build) on an internal network with no route out. It fails
+#       unless the user is uid 10001, the package record names each of
+#       PACKAGES, apk's world is the base's plus PACKAGES, no file is setuid
+#       or setgid, ssh-keyscan reads the server's key, ssh logs in with a key
+#       and with a password through SSH_ASKPASS, runs a command and opens a
+#       remote pseudo-terminal, sftp copies a file there and back, a changed
+#       and an unknown host key are each refused before any command runs,
+#       and ssh runs as the invoking uid given a passwd line for it. PLATFORM
+#       asks for, and checks, one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -103,11 +121,12 @@
 #       published.
 #
 # Needs bash, awk, shellcheck, and python3 with PyYAML; --unsafe-image,
-# --files-image, --typst-image and --clamav-db need a container runtime
-# instead (--files-image and --typst-image one that takes docker's run flags
-# for the hardening), --typst-image also python3 and network to build its
-# strace helper, and --codex-image also file, cosign and network to reach
-# Sigstore.
+# --files-image, --typst-image, --hostlink-image and --clamav-db need a
+# container runtime instead (--files-image, --typst-image and
+# --hostlink-image one that takes docker's run flags for the hardening),
+# --typst-image also python3 and network to build its strace helper,
+# --hostlink-image network to build its OpenSSH server, and --codex-image
+# also file, cosign and network to reach Sigstore.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -917,9 +936,291 @@ codexImage() {
 	return "$bad"
 }
 
+HOSTLINK_CTX=build/agentry-hostlink
+
+# hostlinkPackages prints the Dockerfile's PACKAGES, one a line.
+hostlinkPackages() {
+	sed -n 's/^ARG PACKAGES="\(.*\)"$/\1/p' "$HOSTLINK_CTX/Dockerfile" | tr ' ' '\n' | sed '/^$/d'
+}
+
+# checkHostlink holds the host link image's context to its contract: the
+# OpenSSH client's packages and nothing else, never the setuid
+# openssh-keysign, and a non-root user (plan runtime-hosts.md D5;
+# agentry-dockerimages#71).
+checkHostlink() {
+	local bad=0 p n=0
+	while IFS= read -r p; do
+		n=$((n + 1))
+		case "$p" in
+		openssh-keysign)
+			echo "$HOSTLINK_CTX/Dockerfile: PACKAGES installs openssh-keysign, the client's setuid helper"
+			bad=1
+			;;
+		openssh-*) ;;
+		*)
+			echo "$HOSTLINK_CTX/Dockerfile: PACKAGES installs $p, which is not part of the OpenSSH client"
+			bad=1
+			;;
+		esac
+	done < <(hostlinkPackages)
+	if [ "$n" -eq 0 ]; then
+		echo "$HOSTLINK_CTX/Dockerfile: no ARG PACKAGES line"
+		bad=1
+	fi
+	if ! grep -qx 'USER 10001:10001' "$HOSTLINK_CTX/Dockerfile"; then
+		echo "$HOSTLINK_CTX/Dockerfile: does not run as uid 10001 (USER 10001:10001)"
+		bad=1
+	fi
+	if ! grep -qx 'IMAGE_NAME=agentry-hostlink' "$HOSTLINK_CTX/source.env"; then
+		echo "$HOSTLINK_CTX/source.env: IMAGE_NAME is not agentry-hostlink"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# hostlinkImage runs a built agentry-hostlink hardened, as the runner runs a
+# host link (every capability dropped, no new privileges, a read-only root,
+# the image's own user, the credentials bound read-only), against a
+# throwaway OpenSSH server on an internal network with no route out. It
+# fails unless the image holds PACKAGES and nothing more than the base and
+# their dependencies, records their versions, has no setuid or setgid file,
+# and its client does every thing the host link does: ssh-keyscan reads the
+# server's key, ssh logs in with a key and with a password through
+# SSH_ASKPASS, runs a command, opens a remote pseudo-terminal, sftp copies a
+# file both ways, a changed or unknown host key is refused before any
+# command runs, and ssh runs as another uid given a passwd line for it.
+hostlinkImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid base p v out
+	checkHostlink || return 1
+	local tag="$$-$RANDOM" dir net sshd helper
+	net="agentry-check-hostlink-$tag"
+	sshd="agentry-check-sshd-$tag"
+	helper="agentry-check-sshd:$tag"
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	dir=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: these are local
+	trap "$runtime rm -fv '$sshd' >/dev/null 2>&1; $runtime network rm '$net' >/dev/null 2>&1; $runtime image rm '$helper' >/dev/null 2>&1; rm -rf '$dir'" EXIT
+	local plat=()
+	[ -n "${PLATFORM:-}" ] && plat=(--platform "$PLATFORM")
+	# shellcheck disable=SC2054 # the commas are the tmpfs mount's options
+	local run=("$runtime" run --rm "${plat[@]}" --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /tmp:size=64m --tmpfs /home/hostlink:size=16m,uid=10001,gid=10001,mode=0700
+		--pids-limit 64 --memory 256m)
+	if [ -n "${PLATFORM:-}" ]; then
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --network none --entrypoint /bin/uname "$ref" -m)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+
+	uid=$("${run[@]}" --network none --entrypoint /usr/bin/id "$ref" -u)
+	if [ "$uid" = 10001 ]; then
+		echo "ok   runs as uid 10001, not root"
+	else
+		echo "FAIL runs as uid $uid, not 10001"
+		bad=1
+	fi
+
+	# The record names each of PACKAGES at the version apk resolved, and
+	# apk's world is the base's plus PACKAGES: everything else installed is
+	# the base or one of their dependencies.
+	echo "packages:"
+	"${run[@]}" --network none --entrypoint /bin/cat "$ref" /etc/agentry/hostlink/packages >"$dir/packages"
+	sed 's/^/  /' "$dir/packages"
+	while IFS= read -r p; do
+		if grep -Eq "^$p-[0-9][^ ]*-r[0-9]+\$" "$dir/packages"; then
+			echo "ok   the record names $p"
+		else
+			echo "FAIL the record does not name $p at a version"
+			bad=1
+		fi
+	done < <(hostlinkPackages)
+	if [ "$(wc -l <"$dir/packages")" -ne "$(hostlinkPackages | wc -l)" ]; then
+		echo "FAIL the record has $(wc -l <"$dir/packages") lines for $(hostlinkPackages | wc -l) packages"
+		bad=1
+	fi
+	read -r base < <(awk -F'=' '$1 == "ALPINE_IMAGE" { print $2 }' "$HOSTLINK_CTX/bases.env")
+	read -r p v < <(awk -F'\t' -v u="$base" '!/^[[:space:]]*#/ && $2 == u { print $1, $3; exit }' "$MANIFEST")
+	base="${REGISTRY:-ghcr.io/blaktron}/$p:${base##*:}@$v"
+	{
+		"$runtime" run --rm "${plat[@]}" --network none --entrypoint /bin/cat "$base" /etc/apk/world
+		hostlinkPackages
+	} | sort -u >"$dir/world.want"
+	"${run[@]}" --network none --entrypoint /bin/cat "$ref" /etc/apk/world | sort -u >"$dir/world.got"
+	if cmp -s "$dir/world.want" "$dir/world.got"; then
+		echo "ok   apk's world is the base's ($base) and PACKAGES, nothing more"
+	else
+		echo "FAIL apk's world is not the base's and PACKAGES:"
+		diff "$dir/world.want" "$dir/world.got" | sed 's/^/     /' || true
+		bad=1
+	fi
+
+	# The scan runs as root (still with no capability) so no directory is
+	# unreadable to it, and a scan that could not finish fails.
+	local suid f
+	if ! suid=$("${run[@]}" --network none --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+
+	if out=$("${run[@]}" --network none --entrypoint /usr/bin/ssh "$ref" -V 2>&1) && [[ "$out" == OpenSSH_* ]]; then
+		echo "ok   ssh -V: $out"
+	else
+		echo "FAIL ssh -V: $out"
+		bad=1
+	fi
+	for p in sftp ssh-keyscan ssh-keygen; do
+		if "${run[@]}" --network none --entrypoint /usr/bin/test "$ref" -x "/usr/bin/$p"; then
+			echo "ok   /usr/bin/$p"
+		else
+			echo "FAIL no /usr/bin/$p"
+			bad=1
+		fi
+	done
+
+	# The server: our base mirror with OpenSSH's server, built here (it needs
+	# network to build), on an internal network the host link alone joins.
+	# Its keys and the client's are made fresh for this check.
+	printf 'FROM %s\nRUN apk add --no-cache openssh-server openssh-sftp-server openssh-keygen\n' "$base" |
+		"$runtime" build -q "${plat[@]}" -t "$helper" - >/dev/null
+	"$runtime" run --rm "${plat[@]}" --network none --security-opt label=disable -v "$dir:/w" --entrypoint /bin/sh "$helper" -c '
+		set -e
+		ssh-keygen -q -t ed25519 -N "" -C check -f /w/id
+		ssh-keygen -q -t ed25519 -N "" -C target -f /w/host_key
+		ssh-keygen -q -t ed25519 -N "" -C other -f /w/other_key
+		chown '"$(id -u):$(id -g)"' /w/id /w/id.pub /w/host_key /w/host_key.pub /w/other_key /w/other_key.pub'
+	# ssh holds a key file to 0600 only when the user running it owns it, so
+	# the image's user reads a 0644 copy and the invoking uid its own 0600.
+	cp "$dir/id" "$dir/id600"
+	chmod 600 "$dir/id600"
+	chmod 644 "$dir/id"
+	chmod 755 "$dir"
+	head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$dir/password"
+	printf '#!/bin/sh\nexec cat /cfg/password\n' >"$dir/askpass"
+	chmod 755 "$dir/askpass"
+	printf 'target %s\n' "$(cut -d' ' -f1,2 "$dir/host_key.pub")" >"$dir/known_hosts"
+	printf 'target %s\n' "$(cut -d' ' -f1,2 "$dir/other_key.pub")" >"$dir/changed_hosts"
+	: >"$dir/empty_hosts"
+	printf 'hostlink-payload %s\n' "$(cat "$dir/password")" >"$dir/payload"
+	printf 'put /cfg/payload payload\nget payload /tmp/back\n' >"$dir/batch"
+	printf 'check:x:%s:%s::/tmp:/sbin/nologin\n' "$(id -u)" "$(id -g)" >"$dir/passwd"
+	chmod 644 "$dir/password" "$dir/payload" "$dir/batch" "$dir/passwd" "$dir"/*_hosts
+
+	"$runtime" network create --internal "$net" >/dev/null
+	# shellcheck disable=SC2016 # expanded by the server's shell
+	"$runtime" run -d "${plat[@]}" --name "$sshd" --network "$net" --network-alias target \
+		--security-opt label=disable -v "$dir:/w:ro" --entrypoint /bin/sh "$helper" -c '
+		set -e
+		adduser -D -s /bin/sh agent
+		echo "agent:$(cat /w/password)" | chpasswd >/dev/null
+		install -m 600 /w/host_key /etc/ssh/agentry_host_key
+		install -d -o agent -m 700 /home/agent/.ssh
+		install -o agent -m 600 /w/id.pub /home/agent/.ssh/authorized_keys
+		exec /usr/sbin/sshd -D -e -h /etc/ssh/agentry_host_key -o PasswordAuthentication=yes -o KbdInteractiveAuthentication=no' >/dev/null
+
+	# ssh keeps the first value it is given for an option, so each call
+	# names its own key and its own known_hosts after these.
+	local hl=("${run[@]}" --network "$net" -v "$dir:/cfg:ro")
+	local opts=(-F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o GlobalKnownHostsFile=/dev/null
+		-o StrictHostKeyChecking=yes -o ConnectTimeout=10)
+	local key=(-i /cfg/id -o UserKnownHostsFile=/cfg/known_hosts)
+
+	# ssh-keyscan reads the server's key: it must be the one made for it.
+	local scanned="" _
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		scanned=$("${hl[@]}" --entrypoint /usr/bin/ssh-keyscan "$ref" -T 5 -t ed25519 target 2>/dev/null | grep -v '^#') && [ -n "$scanned" ] && break
+		sleep 1
+	done
+	if [ "$scanned" = "$(cat "$dir/known_hosts")" ]; then
+		echo "ok   ssh-keyscan reads the server's key ($(cut -d' ' -f2 <<<"$scanned"))"
+	else
+		echo "FAIL ssh-keyscan: got \"$scanned\""
+		"$runtime" logs "$sshd" 2>&1 | tail -5 | sed 's/^/     /'
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" "${key[@]}" agent@target 'echo hostlink-ok; id -un' 2>&1) &&
+		[ "$out" = "$(printf 'hostlink-ok\nagent')" ]; then
+		echo "ok   ssh logs in with a key and runs a command"
+	else
+		echo "FAIL ssh with a key: $out"
+		bad=1
+	fi
+
+	# -tt's own "Connection to target closed." goes to stderr; the remote
+	# terminal ends its lines with CR LF.
+	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" "${key[@]}" -tt agent@target 'tty' 2>"$dir/tty.err") &&
+		out="${out//$'\r'/}" && [[ "$out" == /dev/pts/* ]]; then
+		echo "ok   ssh -tt opens a remote pseudo-terminal ($out)"
+	else
+		echo "FAIL ssh -tt: $out $(cat "$dir/tty.err")"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --entrypoint /bin/sh "$ref" -c \
+		'sftp -q -b /cfg/batch "$@" agent@target >/dev/null && cmp /cfg/payload /tmp/back && echo copied' sh "${opts[@]}" "${key[@]}" 2>&1) &&
+		[ "$out" = copied ]; then
+		echo "ok   sftp copies a file to the host and back"
+	else
+		echo "FAIL sftp: $out"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --env SSH_ASKPASS=/cfg/askpass --env SSH_ASKPASS_REQUIRE=force --entrypoint /usr/bin/ssh "$ref" \
+		-F /dev/null -o UserKnownHostsFile=/cfg/known_hosts -o GlobalKnownHostsFile=/dev/null \
+		-o StrictHostKeyChecking=yes -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+		-o NumberOfPasswordPrompts=1 -o ConnectTimeout=10 agent@target 'echo password-ok' 2>&1) &&
+		[ "$out" = password-ok ]; then
+		echo "ok   ssh logs in with a password through SSH_ASKPASS"
+	else
+		echo "FAIL ssh with a password: $out"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" -i /cfg/id -o UserKnownHostsFile=/cfg/changed_hosts agent@target 'echo hostlink-ran' 2>&1); then
+		echo "FAIL ssh ran a command on a host whose key changed: $out"
+		bad=1
+	elif [[ "$out" == *"REMOTE HOST IDENTIFICATION HAS CHANGED"* ]] && [[ "$out" != *hostlink-ran* ]]; then
+		echo "ok   a changed host key is refused before any command"
+	else
+		echo "FAIL a changed host key failed, but not for that reason: $out"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --entrypoint /usr/bin/ssh "$ref" "${opts[@]}" -i /cfg/id -o UserKnownHostsFile=/cfg/empty_hosts agent@target 'echo hostlink-ran' 2>&1); then
+		echo "FAIL ssh ran a command on a host whose key is unknown: $out"
+		bad=1
+	elif [[ "$out" == *"Host key verification failed"* ]] && [[ "$out" != *hostlink-ran* ]]; then
+		echo "ok   an unknown host key is refused before any command"
+	else
+		echo "FAIL an unknown host key failed, but not for that reason: $out"
+		bad=1
+	fi
+
+	if out=$("${hl[@]}" --user "$(id -u):$(id -g)" -v "$dir/passwd:/etc/passwd:ro" --entrypoint /usr/bin/ssh "$ref" \
+		"${opts[@]}" -i /cfg/id600 -o UserKnownHostsFile=/cfg/known_hosts agent@target 'echo uid-ok' 2>&1) && [ "$out" = uid-ok ]; then
+		echo "ok   ssh runs as uid $(id -u) given a passwd line for it, with that uid's 0600 key"
+	else
+		echo "FAIL ssh as uid $(id -u) with a passwd line: $out"
+		bad=1
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -958,6 +1259,9 @@ codexsha checkCodex
 codextag checkCodex
 codexverify checkCodex
 codexcontrol checkCodex
+hostlinkkeysign checkHostlink
+hostlinkextra checkHostlink
+hostlinkuser checkHostlink
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -989,6 +1293,9 @@ breakCase() {
 	codextag) sed -i 's/^CODEX_TAG=.*/CODEX_TAG=latest/' build/agentry-codex/source.env ;;
 	codexverify) sed -i '/--certificate-github-workflow-sha/d' build/agentry-codex/verify.sh ;;
 	codexcontrol) sed -i '0,/^refuse "/s//: refuse "/' build/agentry-codex/fetch.sh ;;
+	hostlinkkeysign) sed -i 's/^ARG PACKAGES="/&openssh-keysign /' build/agentry-hostlink/Dockerfile ;;
+	hostlinkextra) sed -i 's/^ARG PACKAGES="/&sshpass /' build/agentry-hostlink/Dockerfile ;;
+	hostlinkuser) sed -i '/^USER 10001:10001$/d' build/agentry-hostlink/Dockerfile ;;
 	esac
 }
 
@@ -1050,6 +1357,13 @@ case "${1:-}" in
 	}
 	codexImage "$2"
 	;;
+--hostlink-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --hostlink-image <ref>" >&2
+		exit 2
+	}
+	hostlinkImage "$2"
+	;;
 --clamav-db)
 	if [ $# -ne 3 ] || [ ! -d "$2" ]; then
 		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
@@ -1059,7 +1373,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
