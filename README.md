@@ -130,14 +130,17 @@ of its own: it is built on `agentry-alpine`.
 
 ## Repointing the images
 
-The CLI's defaults are tags, not digests. An operator who wants their own
-registry, or digest pins, sets them in the runner's operator policy
+Of the five images below, the CLI's defaults pin two by digest: the harness,
+whose digest each run's receipt names (agentry-cli#738; 1.150.0 since
+agentry-cli#836), and the Go builder. The gateway and the two MCP runtimes
+are tags. An operator who wants their own registry, or digest pins, sets them
+in the runner's operator policy
 (`~/.agentry/runner/policy.yaml`):
 
 ```yaml
 images:
   gateway: ghcr.io/blaktron/agentry-mcp-gateway:v0.43.3
-  harnessDockerAgent: ghcr.io/blaktron/agentry-docker-agent:1.128.0
+  harnessDockerAgent: ghcr.io/blaktron/agentry-docker-agent:1.150.0
   goBuilder: ghcr.io/blaktron/agentry-golang-alpine:1.27-alpine
   nodeRuntime: ghcr.io/blaktron/agentry-node-alpine:24-alpine
   pythonRuntime: ghcr.io/blaktron/agentry-python-alpine:3.12-alpine
