@@ -119,7 +119,7 @@ naming them — see each upstream repository.
 | Our image | Upstream | Licence |
 |---|---|---|
 | `agentry-mcp-gateway` | `docker/mcp-gateway:v0.43.3` | see upstream |
-| `agentry-docker-agent` | `docker/docker-agent:1.128.0` | Apache-2.0 |
+| `agentry-docker-agent` | `docker/docker-agent:1.150.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
 | `agentry-harness-golang` | `golang:1.27.2-alpine3.23` | see upstream (Go: BSD-3; Alpine: MIT) |
