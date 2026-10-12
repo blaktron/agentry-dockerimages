@@ -12,6 +12,11 @@ name: images
 
 on:
   workflow_dispatch:
+    inputs:
+      names:
+        description: "Mirror only these rows of images.tsv (space-separated names) and build nothing; empty mirrors every row and builds every built image"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -51,10 +56,23 @@ jobs:
             echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this pulls from Docker Hub anonymously, limited to 100 pulls per IP, which a full mirror run can exceed"
           fi
 
-      - name: Mirror every mirrored image
-        run: ./scripts/mirror.sh
+      # A run that names rows (a single pin moving, agentry-dockerimages#70)
+      # mirrors only those, so it re-pushes no built image whose tag others
+      # pull. The names reach the shell through env, never the script text,
+      # and each must be an images.tsv name.
+      - name: Mirror every mirrored image, or the named ones
+        env:
+          NAMES: ${{ inputs.names }}
+        run: |
+          set -euo pipefail
+          read -r -a names <<< "${NAMES:-}"
+          for n in "${names[@]}"; do
+            [[ "$n" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "::error::not an image name: $n"; exit 1; }
+          done
+          ./scripts/mirror.sh "${names[@]}"
 
       - name: Build every built image
+        if: ${{ inputs.names == '' }}
         run: |
           set -euo pipefail
           for ctx in build/*/; do

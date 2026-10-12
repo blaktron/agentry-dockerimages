@@ -9,7 +9,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | Image | Upstream | Kind | Used for |
 |---|---|---|---|
 | `agentry-mcp-gateway:v0.43.3` | `docker/mcp-gateway:v0.43.3` | mirror | the MCP gateway, the run's tool plane |
-| `agentry-docker-agent:1.128.0` | `docker/docker-agent:1.128.0` | mirror | the default agent harness |
+| `agentry-docker-agent:1.150.0` | `docker/docker-agent:1.150.0` | mirror | the default agent harness |
 | `agentry-golang-alpine:1.27-alpine` | `golang:1.27-alpine` | mirror | builds the runner image |
 | `agentry-alpine:3.22` | `alpine:3.22` | mirror | the runner image's runtime base |
 | `agentry-node-alpine:24-alpine` | `node:24-alpine` | mirror | installs and runs declared npm MCP servers (the CLI's default since agentry-cli#608) |
