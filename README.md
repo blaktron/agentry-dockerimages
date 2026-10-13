@@ -35,6 +35,10 @@ And one only to build `agentry-codex`: `agentry-cosign:v3.1.3`
 (`ghcr.io/sigstore/cosign/cosign:v3.1.3`), whose binary verifies OpenAI's
 signature on the Codex release in the build's fetch stage
 ([below](#the-codex-image)).
+And two only to build `agentry-browser`: `agentry-ubuntu:noble`
+(`ubuntu:noble`, its base) and `agentry-node-bookworm:24-bookworm-slim`
+(`node:24-bookworm-slim`), which installs the server from its lockfile and
+gives the image its `node` ([below](#the-browser-image)).
 
 `images.tsv` is the manifest: one tab-separated row per image, with our
 name, the upstream ref, the upstream digest, the kind and the role. A `build`
@@ -641,6 +645,127 @@ published digest. Its packages: `openssh-client-default-10.0_p1-r10`,
 `openssh-client-common-10.0_p1-r10` and `openssh-keygen-10.0_p1-r10`
 (OpenSSH 10.0p2, OpenSSL 3.5.8). The native images report 12,845,024 bytes
 (amd64) and 13,370,036 bytes (arm64) in the build jobs' Docker size reports.
+
+## The browser image
+
+`agentry-browser` is the browser server a QuickAgent that declares
+`capabilities.browser` gets (agentry-notes `plans/browser-testing.md` §4, §7,
+D3, D5, D14; agentry-dockerimages#82): Microsoft's
+[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp) driving a
+headless Chrome for Testing. The runner starts it as a server in the run's
+gateway, behind one relay to the run's browse proxy, its only route out. The
+settings that hold a run (the proxy, the tool filter, Chromium's sandbox, the
+output folder, the secrets file) are the runner's, passed when it starts the
+server; the image holds what they need.
+
+| Part | From | Held by |
+|---|---|---|
+| `@playwright/mcp` 0.0.83 in `/app` | npm, `npm ci --ignore-scripts --omit=dev` on our `node:24-bookworm-slim` mirror | `package-lock.json`: an exact version and a sha512 integrity for each of its three packages; no install script runs |
+| Node 24 at `/usr/local/bin/node` | the same mirror, the one file the image takes from it | the mirror's digest (Playwright needs Node 20 or later; noble's own is 18) |
+| Chrome for Testing 155.0.8059.12 (revision 1247) in `/ms-playwright` | Google's Chrome for Testing bucket, the archive Playwright's own installer fetches (its CDN redirects there) | `source.env`: a SHA-256 for each architecture's archive; the build refuses unless the lockfile's `playwright-core` names that same revision and version in its `browsers.json` (`fetch.sh`) |
+| the system libraries | Ubuntu's archive | Playwright's own `install-deps chromium`, which names the packages for 24.04. Their versions are the archive's on the day of the build: recorded in `/etc/agentry/browser/packages`, not pinned |
+| the Chrome policy at `/etc/opt/chrome_for_testing/policies/managed/agentry.json` | `policy.json` | the check below |
+
+It is our mirror of `ubuntu:noble`, the base the operator chose after the
+plan's M1 (agentry-cli#914). Microsoft's own `mcr.microsoft.com/playwright`
+base bundles every browser at the stable release's revisions, which never
+match `@playwright/mcp`'s: every release of the server so far pins an alpha
+Playwright. That base also carries 15 setuid programs. A local amd64 build
+of this image was 1.42 GB on 2026-10-13, where M1's probe on Microsoft's
+base was 4.1–4.7 GB.
+
+**What the SHA-256 rests on.** Chrome for Testing publishes no signature.
+Each archive's SHA-256 in `source.env` was taken from a download that matched
+the MD5 Google stores for the object (its `x-goog-hash`); from then on every
+build is held to it.
+
+**The full build, not the headless shell.** `@playwright/mcp`'s
+`--browser chromium` launches Chrome for Testing even headless, and the
+headless shell ignores enterprise policies, so the image holds the full build
+and nothing else in `/ms-playwright`.
+
+**The policy.** The browse proxy refuses a TLS ClientHello that offers
+Encrypted Client Hello, because then the name a CDN routes by is hidden
+(agentry-cli#616). Chromium sends a GREASE ECH extension on every
+connection, and no launch flag stops it; only the policy
+`EncryptedClientHelloEnabled: false` does, read from this path alone (M1).
+The same file turns off QUIC, DNS-over-HTTPS, WebRTC UDP that does not go
+through the proxy, component updates, and Google's background services
+(autofill, the password manager, sign-in, sync, search suggestions, network
+prediction, metrics, Safe Browsing, translate, spell-check). The check below
+proves the ECH key live; the others it holds only as keys in `policy.json`
+(`checkBrowser` requires ECH, QUIC and DNS-over-HTTPS off), and M1 measured
+their effect behind a proxy (agentry-cli#914).
+
+**The user.** The image runs as uid 10001 (`browser`, home `/home/browser`),
+never root, in `/out-browser`, where the runner binds the run's
+`reports/browser/`: `@playwright/mcp` resolves a file name the model chooses
+against its working directory, and the gateway's catalog cannot set one. No
+file is setuid or setgid: the base's are stripped, and Chrome's
+`chrome_sandbox` helper is not made one. Chromium's own sandbox is the
+runner's to turn on (it needs user namespaces, which Docker's default
+seccomp profile refuses under runc; plan §7).
+
+`/etc/agentry/browser/record` names, one a line, the server's version,
+Playwright's, Node's, and the browser's revision, version, architecture and
+archive SHA-256, for the receipt. The licences are in
+`/usr/share/licenses/agentry-browser`: Node's, the three npm packages'
+(with Playwright's `NOTICE` and `ThirdPartyNotices.txt`), and Chrome for
+Testing's `ABOUT`, which points at the credits the browser carries itself
+(`chrome://credits`).
+
+**The check.** `scripts/check.sh --browser-image <ref>` runs the image the
+way the runner runs its browser server: no network, every capability
+dropped, no new privileges, a read-only root, the image's own user, a tmpfs
+home and `/tmp`, and an output folder bound read-write. It fails unless:
+
+- the user is uid 10001, the working directory `/out-browser` and the
+  entrypoint `@playwright/mcp`;
+- the record names `source.env`'s server and Playwright, and this
+  architecture's browser revision, version and SHA-256;
+- the browser is where the image's Playwright looks, and is the only build
+  in `/ms-playwright`;
+- the licences are there;
+- no file is setuid or setgid;
+- `check/probe.mjs`, run inside the image by its own Node and driving its
+  `@playwright/mcp` over stdio, as the gateway does, with two servers of its
+  own on loopback:
+  - initialize answers with `source.env`'s Playwright, and `tools/list` holds
+    the tools the runner's filter passes first, the testing and PDF ones
+    included;
+  - the fixture page renders, the browser that runs reports the record's
+    Chrome version, and `browser_verify_text_visible` finds its heading;
+  - a screenshot and a PDF with chosen names land in `/out-browser`, and a
+    name outside it is refused;
+  - a secret typed by name (`--secrets`, plan D9) reaches the field, and its
+    value appears in no result;
+  - the ClientHello Chromium sends names its host and offers no ECH;
+- the probe's control, run with the policy folder hidden, sees ECH offered,
+  which proves the listener would catch it and the policy is what stops it.
+
+**Publishing and signing.** The `browser` workflow (manual dispatch, from
+`main` only) works as the `hostlink` workflow does. It builds each
+architecture natively and checks it before pushing, joins the pushed digests
+into a tag named for the UTC date and the run number, checks the joined
+digest, signs it keyless as the workflow, and verifies the signature before
+it reports the `images.tsv` row:
+
+```
+cosign verify ghcr.io/blaktron/agentry-browser@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/browser.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+**A bump** is by hand. Set the new version in `package.json`, then run
+`npm install --package-lock-only --ignore-scripts` in `build/agentry-browser/`.
+Take the chromium revision and version the new `playwright-core`'s
+`browsers.json` names into `source.env`, with `MCP_VERSION` and
+`PLAYWRIGHT_VERSION`. Then download each architecture's
+`chrome-linux64.zip` and `chrome-linux-arm64.zip` from
+`https://storage.googleapis.com/chrome-for-testing-public/<version>/`, check
+each against the MD5 Google stores for it (the `x-goog-hash` header), and
+take its SHA-256. The tool names the runner's filter passes are re-read
+against the new server's (plan §7).
 
 ## Building Docker Agent from source
 
