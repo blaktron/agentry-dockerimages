@@ -22,6 +22,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
 | `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 | `agentry-ripgrep:2026.10.13.2` | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed ([below](#the-ripgrep-image)) |
+| `agentry-browser:2026.10.13.1` | `ubuntu:noble` + `@playwright/mcp` 0.0.83 + Chrome for Testing 155.0.8059.12 + `build/agentry-browser/` | build | the browser server a QuickAgent that declares `capabilities.browser` gets, amd64 and arm64, signed ([below](#the-browser-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -766,6 +767,14 @@ Take the chromium revision and version the new `playwright-core`'s
 each against the MD5 Google stores for it (the `x-goog-hash` header), and
 take its SHA-256. The tool names the runner's filter passes are re-read
 against the new server's (plan §7).
+
+The first build is `ghcr.io/blaktron/agentry-browser:2026.10.13.1@sha256:61bf9d5577ebf0aea1059bab30bd9e06a9c4011ba42792b06bd66f99c41b5af7`
+(run 38454240153, 2026-10-13): amd64 `5973ea46…` and arm64 `7e551e2c…`.
+Each architecture, then the joined digest, passed every line of the check.
+The signature verified from the workstation the same day, an anonymous
+manifest fetch answered 200, and the check passed again there against the
+published digest. The native images report 1,000,957,792 bytes (amd64) and
+1,024,059,674 bytes (arm64) in the build jobs' Docker size reports.
 
 ## Building Docker Agent from source
 
