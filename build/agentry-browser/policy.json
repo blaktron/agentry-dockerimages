@@ -1,0 +1,21 @@
+{
+  "EncryptedClientHelloEnabled": false,
+  "QuicAllowed": false,
+  "DnsOverHttpsMode": "off",
+  "WebRtcIPHandling": "disable_non_proxied_udp",
+  "ComponentUpdatesEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "PasswordManagerEnabled": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "SearchSuggestEnabled": false,
+  "NetworkPredictionOptions": 2,
+  "MetricsReportingEnabled": false,
+  "SafeBrowsingProtectionLevel": 0,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "TranslateEnabled": false,
+  "BackgroundModeEnabled": false,
+  "DefaultSearchProviderEnabled": false
+}

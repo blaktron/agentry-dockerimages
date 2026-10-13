@@ -38,10 +38,18 @@
 #     version tag, its Dockerfile builds other than the default features or
 #     no longer refuses PCRE2 in the dependency tree, or its fixture tree is
 #     missing (build/ripgrep).
+#   - the browser image's source.env does not pin the server, its Playwright,
+#     a Chrome for Testing revision and version from Google's bucket and a
+#     SHA-256 for each architecture; package.json and package-lock.json do
+#     not pin that same server and Playwright with sha512 integrity; the
+#     policy does not turn ECH, QUIC and DNS-over-HTTPS off; the Dockerfile
+#     does not install with --ignore-scripts, fetch with fetch.sh, install
+#     the policy, or run as uid 10001 in /out-browser; or fetch.sh does not
+#     check the SHA-256 and browsers.json (build/agentry-browser).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
-# --files-image, --typst-image, --codex-image, --hostlink-image and
-# --ripgrep-image mode, which run the image they name.
+# --files-image, --typst-image, --codex-image, --hostlink-image,
+# --ripgrep-image and --browser-image mode, which run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -132,6 +140,22 @@
 #       which needs network to build) makes no network system call and
 #       starts no other program. PLATFORM asks for, and checks, one
 #       architecture.
+#   scripts/check.sh --browser-image <ref>
+#       run a built agentry-browser hardened, as the runner runs its browser
+#       server (plan browser-testing.md §7; agentry-dockerimages#82): no
+#       network, every capability dropped, no new privileges, a read-only
+#       root, uid 10001, a tmpfs home and /tmp, an output folder bound
+#       read-write. It fails unless the working directory is /out-browser,
+#       the record names source.env's server, Playwright and this
+#       architecture's browser and SHA-256, the browser is the only build in
+#       /ms-playwright, no file is setuid or setgid, and
+#       build/agentry-browser/check/probe.mjs, driving the image's
+#       @playwright/mcp over stdio, renders the fixture page, writes a
+#       screenshot and a PDF to the output folder and refuses a name outside
+#       it, types a secret by name with its value masked, and sees a
+#       ClientHello with no ECH; then the probe's control, with the policy
+#       folder hidden, must see ECH offered. PLATFORM asks for, and checks,
+#       one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -1492,9 +1516,234 @@ hostlinkImage() {
 	return "$bad"
 }
 
+BROWSER_CTX=build/agentry-browser
+
+# checkBrowser holds the browser image's context to its contract (plan
+# browser-testing.md §7, D5, D14; agentry-dockerimages#82): source.env pins
+# the server, the Playwright it brings, the Chrome for Testing revision and
+# version and a SHA-256 for each architecture's archive from Google's bucket;
+# package.json and package-lock.json pin that same server and Playwright,
+# with integrity hashes, and are installed with --ignore-scripts; fetch.sh
+# holds the archive to its SHA-256 and browsers.json to source.env; the
+# policy turns ECH and QUIC off; and the image runs as uid 10001 in
+# /out-browser.
+checkBrowser() {
+	local bad=0
+	(
+		# shellcheck source=/dev/null
+		. "$BROWSER_CTX/source.env"
+		b=0
+		[[ "${MCP_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$BROWSER_CTX/source.env: MCP_VERSION is not a release version: ${MCP_VERSION:-}"
+			b=1
+		}
+		[[ "${PLAYWRIGHT_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || {
+			echo "$BROWSER_CTX/source.env: PLAYWRIGHT_VERSION is not a version: ${PLAYWRIGHT_VERSION:-}"
+			b=1
+		}
+		[[ "${CHROMIUM_REVISION:-}" =~ ^[0-9]+$ ]] || {
+			echo "$BROWSER_CTX/source.env: CHROMIUM_REVISION is not a revision: ${CHROMIUM_REVISION:-}"
+			b=1
+		}
+		[[ "${CHROMIUM_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$BROWSER_CTX/source.env: CHROMIUM_VERSION is not a Chrome version: ${CHROMIUM_VERSION:-}"
+			b=1
+		}
+		[ "${CHROMIUM_URL:-}" = https://storage.googleapis.com/chrome-for-testing-public ] || {
+			echo "$BROWSER_CTX/source.env: CHROMIUM_URL is not Google's Chrome for Testing bucket: ${CHROMIUM_URL:-}"
+			b=1
+		}
+		for key in CHROMIUM_SHA256_AMD64 CHROMIUM_SHA256_ARM64; do
+			val="${!key:-}"
+			[[ "$val" =~ ^[0-9a-f]{64}$ ]] || {
+				echo "$BROWSER_CTX/source.env: $key is not a SHA-256: $val"
+				b=1
+			}
+		done
+		[ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$BROWSER_CTX/source.env: PLATFORMS is not linux/amd64,linux/arm64: ${PLATFORMS:-}"
+			b=1
+		}
+		[ "${IMAGE_NAME:-}" = agentry-browser ] || {
+			echo "$BROWSER_CTX/source.env: IMAGE_NAME is not agentry-browser"
+			b=1
+		}
+		python3 - "$BROWSER_CTX" "${MCP_VERSION:-}" "${PLAYWRIGHT_VERSION:-}" <<'PY' || b=1
+import json, sys
+ctx, mcp, pw = sys.argv[1:4]
+bad = False
+def say(msg):
+    global bad
+    print(f"{ctx}/{msg}")
+    bad = True
+pkg = json.load(open(f"{ctx}/package.json"))
+if pkg.get("dependencies") != {"@playwright/mcp": mcp}:
+    say(f"package.json: dependencies are not exactly @playwright/mcp {mcp}: {pkg.get('dependencies')}")
+lock = json.load(open(f"{ctx}/package-lock.json"))
+pk = lock.get("packages", {})
+for name, want in (("@playwright/mcp", mcp), ("playwright-core", pw), ("playwright", pw)):
+    got = pk.get(f"node_modules/{name}", {})
+    if got.get("version") != want:
+        say(f"package-lock.json: {name} is {got.get('version')}, not {want}")
+    if not str(got.get("integrity", "")).startswith("sha512-"):
+        say(f"package-lock.json: {name} has no sha512 integrity")
+for path, p in pk.items():
+    if path and not p.get("integrity", "").startswith("sha512-"):
+        say(f"package-lock.json: {path} has no sha512 integrity")
+policy = json.load(open(f"{ctx}/policy.json"))
+for key in ("EncryptedClientHelloEnabled", "QuicAllowed"):
+    if policy.get(key) is not False:
+        say(f"policy.json: {key} is not false")
+if policy.get("DnsOverHttpsMode") != "off":
+    say("policy.json: DnsOverHttpsMode is not off")
+sys.exit(1 if bad else 0)
+PY
+		exit "$b"
+	) || bad=1
+	if ! grep -q '^RUN npm ci --ignore-scripts ' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not install the lockfile with npm ci --ignore-scripts"
+		bad=1
+	fi
+	# shellcheck disable=SC2016 # the Dockerfile's own $TARGETARCH, matched literally
+	if ! grep -q '^RUN TARGETARCH="\$TARGETARCH" sh /agentry/fetch.sh ' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not fetch the browser with fetch.sh"
+		bad=1
+	fi
+	if ! grep -qx 'COPY policy.json /etc/opt/chrome_for_testing/policies/managed/agentry.json' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not install policy.json where Chrome for Testing reads it"
+		bad=1
+	fi
+	if ! grep -qx 'USER 10001:10001' "$BROWSER_CTX/Dockerfile" || ! grep -qx 'WORKDIR /out-browser' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not run as uid 10001 in /out-browser"
+		bad=1
+	fi
+	if ! grep -q '| sha256sum -c - || refuse ' "$BROWSER_CTX/fetch.sh" ||
+		! grep -q 'refuse "browsers.json names chromium' "$BROWSER_CTX/fetch.sh"; then
+		echo "$BROWSER_CTX/fetch.sh: does not hold the archive to its SHA-256 and browsers.json to source.env"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# browserImage runs a built agentry-browser hardened, as the runner runs its
+# browser server (no network, every capability dropped, no new privileges, a
+# read-only root, the image's own user, a tmpfs home and /tmp, an output
+# folder bound read-write; plan browser-testing.md §7, agentry-dockerimages#82).
+# It fails unless the user is uid 10001 and the working directory
+# /out-browser, the record names source.env's server, Playwright and this
+# architecture's browser and SHA-256, the browser is at the path the image's
+# Playwright expects and the headless shell is absent, no file is setuid or
+# setgid, and check/probe.mjs, driving the image's @playwright/mcp over stdio,
+# renders the fixture page, writes a screenshot and a PDF there and nowhere
+# else, types a secret by name with its value masked, and sends a ClientHello
+# with no ECH; then the probe's control, with the policy folder hidden, must
+# see ECH offered. PLATFORM asks for, and checks, one architecture.
+browserImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid out dir
+	checkBrowser || return 1
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	dir=$(mktemp -d)
+	chmod 0777 "$dir"
+	# shellcheck disable=SC2064 # expand now: it is local
+	trap "rm -rf '$dir'" EXIT
+	local plat=()
+	[ -n "${PLATFORM:-}" ] && plat=(--platform "$PLATFORM")
+	# shellcheck disable=SC2054 # the commas are the tmpfs mounts' options
+	local run=("$runtime" run --rm "${plat[@]}" --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /tmp:size=512m --tmpfs /home/browser:size=64m,uid=10001,gid=10001,mode=0700
+		--pids-limit 512 --memory 2g)
+	# shellcheck source=/dev/null
+	. "$BROWSER_CTX/source.env"
+
+	arch=$("${run[@]}" --entrypoint /usr/bin/uname "$ref" -m)
+	case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+	if [ -n "${PLATFORM:-}" ]; then
+		want="${PLATFORM##*/}"
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+
+	uid=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u)
+	if [ "$uid" = 10001 ]; then
+		echo "ok   runs as uid 10001, not root"
+	else
+		echo "FAIL runs as uid $uid, not 10001"
+		bad=1
+	fi
+	out=$("$runtime" image inspect "$ref" --format '{{.Config.WorkingDir}} {{json .Config.Entrypoint}}')
+	if [ "$out" = '/out-browser ["/usr/local/bin/node","/app/node_modules/@playwright/mcp/cli.js"]' ]; then
+		echo "ok   works in /out-browser and starts @playwright/mcp"
+	else
+		echo "FAIL working directory and entrypoint: $out"
+		bad=1
+	fi
+
+	local sum dirname
+	case "$arch" in
+	amd64) sum="$CHROMIUM_SHA256_AMD64" dirname=chrome-linux64 ;;
+	arm64) sum="$CHROMIUM_SHA256_ARM64" dirname=chrome-linux-arm64 ;;
+	*)
+		echo "FAIL no browser build for $arch"
+		return 1
+		;;
+	esac
+	echo "record:"
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/browser/record | tee "$dir/record" | sed 's/^/  /'
+	if grep -qx "mcp $MCP_VERSION" "$dir/record" && grep -qx "playwright $PLAYWRIGHT_VERSION" "$dir/record" &&
+		grep -qx "chromium $CHROMIUM_REVISION $CHROMIUM_VERSION $arch $sum" "$dir/record" &&
+		grep -Eqx 'node v(2[0-9]|[3-9][0-9])\.[0-9]+\.[0-9]+' "$dir/record"; then
+		echo "ok   the record names source.env's server, Playwright and this architecture's browser and SHA-256"
+	else
+		echo "FAIL the record does not match source.env"
+		bad=1
+	fi
+	echo "  $("${run[@]}" --entrypoint /usr/bin/wc "$ref" -l /etc/agentry/browser/packages | cut -d' ' -f1) Debian packages recorded"
+
+	# Where the image's own Playwright looks, and nothing else under
+	# /ms-playwright: no headless shell, no other browser.
+	if out=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'ls /ms-playwright; test -x /ms-playwright/chromium-'"$CHROMIUM_REVISION"'/'"$dirname"'/chrome && echo executable') &&
+		[ "$out" = "chromium-$CHROMIUM_REVISION
+executable" ]; then
+		echo "ok   the browser is chromium-$CHROMIUM_REVISION/$dirname/chrome, the only build in /ms-playwright"
+	else
+		echo "FAIL /ms-playwright holds: $out"
+		bad=1
+	fi
+
+	# The scan runs as root with DAC_READ_SEARCH alone, so no directory is
+	# unreadable to it (Ubuntu's base keeps 0700 ones, which root without a
+	# capability cannot list), and a scan that could not finish fails.
+	local suid f
+	if ! suid=$("${run[@]}" --user 0:0 --cap-add DAC_READ_SEARCH --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+
+	local probe=("${run[@]}" -v "$dir:/out-browser:rw" -v "$PWD/$BROWSER_CTX/check:/check:ro" --entrypoint /usr/local/bin/node)
+	if ! "${probe[@]}" "$ref" /check/probe.mjs; then
+		echo "FAIL the probe"
+		bad=1
+	fi
+	if ! "${probe[@]}" --tmpfs /etc/opt/chrome_for_testing/policies/managed:size=1m "$ref" /check/probe.mjs control; then
+		echo "FAIL the probe's control"
+		bad=1
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -1539,6 +1788,12 @@ hostlinkuser checkHostlink
 ripgrepcommit checkRipgrep
 ripgrepfeatures checkRipgrep
 ripgreppcre checkRipgrep
+browsersha checkBrowser
+browserlock checkBrowser
+browserech checkBrowser
+browseruser checkBrowser
+browserscripts checkBrowser
+browserfetch checkBrowser
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -1576,6 +1831,12 @@ breakCase() {
 	ripgrepcommit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=master/' build/ripgrep/source.env ;;
 	ripgrepfeatures) sed -i 's/--bin rg;/--bin rg --features pcre2;/' build/ripgrep/Dockerfile ;;
 	ripgreppcre) sed -i 's/for c in pcre2 pcre2-sys grep-pcre2 /for c in /' build/ripgrep/Dockerfile ;;
+	browsersha) sed -i 's/^CHROMIUM_SHA256_ARM64=.*/CHROMIUM_SHA256_ARM64=latest/' build/agentry-browser/source.env ;;
+	browserlock) sed -i 's/"@playwright\/mcp": "[^"]*"/"@playwright\/mcp": "latest"/' build/agentry-browser/package.json ;;
+	browserech) sed -i 's/"EncryptedClientHelloEnabled": false/"EncryptedClientHelloEnabled": true/' build/agentry-browser/policy.json ;;
+	browseruser) sed -i '/^USER 10001:10001$/d' build/agentry-browser/Dockerfile ;;
+	browserscripts) sed -i 's/^RUN npm ci --ignore-scripts /RUN npm ci /' build/agentry-browser/Dockerfile ;;
+	browserfetch) sed -i 's/ | sha256sum -c - || refuse / | true || refuse /' build/agentry-browser/fetch.sh ;;
 	esac
 }
 
@@ -1644,6 +1905,13 @@ case "${1:-}" in
 	}
 	hostlinkImage "$2"
 	;;
+--browser-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --browser-image <ref>" >&2
+		exit 2
+	}
+	browserImage "$2"
+	;;
 --ripgrep-image)
 	[ $# -eq 2 ] || {
 		echo "usage: scripts/check.sh --ripgrep-image <ref>" >&2
@@ -1660,7 +1928,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --ripgrep-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
