@@ -21,7 +21,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
 | `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
-| `agentry-ripgrep` (first build pending) | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed by its workflow once built ([below](#the-ripgrep-image)) |
+| `agentry-ripgrep:2026.10.13.2` | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed ([below](#the-ripgrep-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -888,7 +888,17 @@ crates linked, each with its licence file; a static-pie binary; an image of
 9,275,888 bytes. The `ripgrep` workflow (dispatched from `main`) builds both
 architectures natively, checks each, joins them, signs the joined digest
 keyless and verifies the signature; its run's summary prints the
-`images.tsv` row. The pinned build is recorded here when it exists.
+`images.tsv` row.
+
+The pinned build is `ghcr.io/blaktron/agentry-ripgrep:2026.10.13.2@sha256:2891a3998ffa4877998ad7f167ea00971e09fa3c68dcafc128e609c8cabee718`
+(run 38390353450, 2026-10-13): amd64 `36c0427c…` and arm64 `6938a315…`,
+each checked before it was pushed, the joined digest checked again, then
+signed and verified. The signature verified from the workstation and an
+anonymous manifest fetch answered 200 the same day. The amd64 binary's build
+ID is the local build's (`182e10dc…`): the build reproduced. The first run
+(38389401256) pushed both architectures but stopped at the joined digest's
+check, whose version line read the runtime's pull progress (fixed in #85);
+its tag `2026.10.13.1` was never signed and is not used.
 
 ## Licence
 
