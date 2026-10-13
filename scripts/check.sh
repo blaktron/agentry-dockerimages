@@ -872,12 +872,14 @@ ripgrepImage() {
 	local flags=(--no-config --no-ignore --hidden --glob '!.git' --max-filesize 8M
 		--max-columns 400 --max-columns-preview --threads 2 --regex-size-limit 16M --dfa-size-limit 64M)
 
-	got=$("${run[@]}" "$ref" --version 2>&1) || got=""
+	# stdout alone: the first run of an image not yet local has the runtime's
+	# pull progress on stderr, which is not rg's to answer for.
+	got=$("${run[@]}" "$ref" --version 2>"$out/err") || got=""
 	if grep -qx "ripgrep $tag" <<<"$(head -1 <<<"$got")" && grep -qF 'PCRE2 is not available' <<<"$got"; then
 		echo "ok   rg --version: ripgrep $tag, no PCRE2"
 	else
 		echo "FAIL rg --version is not ripgrep $tag without PCRE2:"
-		head -6 <<<"$got" | sed 's/^/     /'
+		cat - "$out/err" <<<"$got" | head -8 | sed 's/^/     /'
 		bad=1
 	fi
 
