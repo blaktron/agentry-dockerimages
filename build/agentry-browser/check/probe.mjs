@@ -3,12 +3,13 @@
 // user. It drives the image's @playwright/mcp over stdio, as the gateway
 // does, against two servers of its own on loopback:
 //
-//   127.0.0.1:8080  the fixture page (fixture.html), over plain http
+//   127.0.0.1:8080  the fixture page (fixture.html), over plain http at
+//                   localhost, a secure context, so the client hints answer
 //   127.0.0.1:8443  a listener that reads the TLS ClientHello Chromium sends
 //                   and closes: the server name and whether it offers ECH
 //
-// Chromium reaches both as *.test through --host-resolver-rules. Each step
-// prints "ok   …" or "FAIL …"; the exit status is 1 on any FAIL.
+// Chromium reaches the listener as probe.test through --host-resolver-rules.
+// Each step prints "ok   …" or "FAIL …"; the exit status is 1 on any FAIL.
 //
 //   node probe.mjs          the image as built: ECH must be off (its policy)
 //   node probe.mjs control  the negative control, run with the policy folder
@@ -150,6 +151,9 @@ try {
 	server.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
 
 	const tools = (await rpc("tools/list", {})).result.tools.map((t) => t.name);
+	// A sample of the tools the runner's filter passes (agentry-notes
+	// plans/browser-testing.md §7, held by agentry-cli at M4), the testing and
+	// PDF ones included: a server bump that renames one fails here first.
 	const want = ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_fill_form",
 		"browser_take_screenshot", "browser_evaluate", "browser_network_requests", "browser_console_messages",
 		"browser_verify_text_visible", "browser_verify_element_visible", "browser_generate_locator", "browser_pdf_save"];
@@ -159,10 +163,19 @@ try {
 		: fail(`tools/list lacks ${missing.join(", ")}`);
 
 	if (!control) {
-		let r = await call("browser_navigate", { url: "http://fixture.test:8080/" });
+		let r = await call("browser_navigate", { url: "http://localhost:8080/" });
 		!r.isError && r.text.includes("Agentry browser check")
 			? ok("the fixture page renders (its title is in the result)")
 			: fail(`navigate to the fixture: ${r.text.slice(0, 400)}`);
+
+		// The user agent string is reduced to 155.0.0.0; the full version
+		// is a high-entropy client hint.
+		r = await call("browser_evaluate", {
+			function: "async () => (await navigator.userAgentData.getHighEntropyValues(['uaFullVersion'])).uaFullVersion",
+		});
+		r.text.includes(`"${record.chromium[1]}"`)
+			? ok(`the browser that runs is Chrome ${record.chromium[1]}, the record's`)
+			: fail(`the browser does not report Chrome ${record.chromium[1]}: ${r.text.slice(0, 300)}`);
 
 		r = await call("browser_verify_text_visible", { text: "Fixture page" });
 		!r.isError ? ok("browser_verify_text_visible finds the heading") : fail(`verify text: ${r.text.slice(0, 300)}`);

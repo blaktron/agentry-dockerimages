@@ -26,12 +26,23 @@
 #                        launch flag stops Chromium's GREASE ECH (M1). The
 #                        rest turns off QUIC, DNS-over-HTTPS, non-proxied
 #                        WebRTC UDP and Google's background services
-#   /etc/agentry/browser the record: record (the server, Playwright, Node and
-#                        the browser, with its archive's SHA-256) and packages
-#                        (every Debian package installed, name and version)
+#   /etc/agentry/browser/record
+#                        one line each for the server, Playwright, Node and
+#                        the browser (revision, version, architecture and
+#                        archive SHA-256), for the receipt
+#   /etc/agentry/browser/packages
+#                        every Debian package installed, name and version
+#   /usr/share/licenses/agentry-browser
+#                        Node's LICENSE, the three npm packages' LICENSE (and
+#                        Playwright's NOTICE and ThirdPartyNotices.txt), and
+#                        Chrome for Testing's ABOUT, which points at the
+#                        credits the browser itself carries (chrome://credits)
 #
 # The system libraries come from Ubuntu's archive through Playwright's own
-# install-deps for chromium, which names the packages for this release. No
+# install-deps for chromium, which names the packages for this release; their
+# versions are the archive's on the day of the build, recorded in
+# /etc/agentry/browser/packages, not pinned (as apk's are recorded for the
+# host link image). No
 # file is setuid or setgid: the base's are stripped, and Chrome's own
 # chrome_sandbox helper is not made one (the runner runs Chromium's namespace
 # sandbox, or the container is the sandbox).
@@ -72,18 +83,28 @@ RUN TARGETARCH="$TARGETARCH" sh /agentry/fetch.sh /agentry/source.env /agentry/b
 FROM ${UBUNTU_IMAGE}
 COPY --from=server /usr/local/bin/node /usr/local/bin/node
 COPY --from=server /app /app
+# install-deps runs apt-get against the same archive; retried the same way.
 RUN for try in 1 2 3 4 5; do \
 		node /app/node_modules/playwright-core/cli.js install-deps chromium && break; \
 		[ "$try" = 5 ] && exit 1; sleep 30; \
 	done \
 	&& rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 COPY --from=fetch /ms-playwright /ms-playwright
+COPY --from=server /usr/local/LICENSE /usr/share/licenses/agentry-browser/node/LICENSE
 COPY policy.json /etc/opt/chrome_for_testing/policies/managed/agentry.json
 RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + \
 	&& groupadd -g 10001 browser \
 	&& useradd -u 10001 -g browser -d /home/browser -m -s /usr/sbin/nologin browser \
 	&& install -d -o 10001 -g 10001 -m 0755 /out-browser \
 	&& install -d -m 0755 /etc/agentry/browser \
+	&& for p in @playwright/mcp playwright playwright-core; do \
+		install -d "/usr/share/licenses/agentry-browser/$p" \
+		&& cp /app/node_modules/$p/LICENSE "/usr/share/licenses/agentry-browser/$p/"; \
+	done \
+	&& cp /app/node_modules/playwright-core/NOTICE /app/node_modules/playwright-core/ThirdPartyNotices.txt \
+		/usr/share/licenses/agentry-browser/playwright-core/ \
+	&& install -d /usr/share/licenses/agentry-browser/chrome-for-testing \
+	&& cp /ms-playwright/chromium-*/chrome-linux*/ABOUT /usr/share/licenses/agentry-browser/chrome-for-testing/ \
 	&& { \
 		echo "mcp $(node -p 'require("/app/node_modules/@playwright/mcp/package.json").version')"; \
 		echo "playwright $(node -p 'require("/app/node_modules/playwright-core/package.json").version')"; \

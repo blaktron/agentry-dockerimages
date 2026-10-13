@@ -22,7 +22,6 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
 | `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
 | `agentry-ripgrep:2026.10.13.2` | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed ([below](#the-ripgrep-image)) |
-| `agentry-browser` (not yet built) | `ubuntu:noble` + `@playwright/mcp` + Chrome for Testing + `build/agentry-browser/` | build | the browser server a QuickAgent that declares `capabilities.browser` gets, amd64 and arm64, signed ([below](#the-browser-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -663,16 +662,22 @@ server; the image holds what they need.
 |---|---|---|
 | `@playwright/mcp` 0.0.83 in `/app` | npm, `npm ci --ignore-scripts --omit=dev` on our `node:24-bookworm-slim` mirror | `package-lock.json`: an exact version and a sha512 integrity for each of its three packages; no install script runs |
 | Node 24 at `/usr/local/bin/node` | the same mirror, the one file the image takes from it | the mirror's digest (Playwright needs Node 20 or later; noble's own is 18) |
-| Chrome for Testing 155.0.8059.12 (revision 1247) in `/ms-playwright` | Google's Chrome for Testing bucket | `source.env`: a SHA-256 for each architecture's archive; the build refuses unless the lockfile's `playwright-core` names that same revision and version in its `browsers.json` (`fetch.sh`) |
-| the system libraries | Ubuntu's archive | Playwright's own `install-deps chromium`, which names the packages for 24.04; `/etc/agentry/browser/packages` lists every Debian package installed, with its version |
+| Chrome for Testing 155.0.8059.12 (revision 1247) in `/ms-playwright` | Google's Chrome for Testing bucket, the archive Playwright's own installer fetches (its CDN redirects there) | `source.env`: a SHA-256 for each architecture's archive; the build refuses unless the lockfile's `playwright-core` names that same revision and version in its `browsers.json` (`fetch.sh`) |
+| the system libraries | Ubuntu's archive | Playwright's own `install-deps chromium`, which names the packages for 24.04. Their versions are the archive's on the day of the build: recorded in `/etc/agentry/browser/packages`, not pinned |
 | the Chrome policy at `/etc/opt/chrome_for_testing/policies/managed/agentry.json` | `policy.json` | the check below |
 
 It is our mirror of `ubuntu:noble`, the base the operator chose after the
 plan's M1 (agentry-cli#914). Microsoft's own `mcr.microsoft.com/playwright`
 base bundles every browser at the stable release's revisions, which never
 match `@playwright/mcp`'s: every release of the server so far pins an alpha
-Playwright. That base also carries 15 setuid programs. This image is
-1.42 GB on amd64, where M1's probe on Microsoft's base was 4.1–4.7 GB.
+Playwright. That base also carries 15 setuid programs. A local amd64 build
+of this image was 1.42 GB on 2026-10-13, where M1's probe on Microsoft's
+base was 4.1–4.7 GB.
+
+**What the SHA-256 rests on.** Chrome for Testing publishes no signature.
+Each archive's SHA-256 in `source.env` was taken from a download that matched
+the MD5 Google stores for the object (its `x-goog-hash`); from then on every
+build is held to it.
 
 **The full build, not the headless shell.** `@playwright/mcp`'s
 `--browser chromium` launches Chrome for Testing even headless, and the
@@ -687,7 +692,10 @@ connection, and no launch flag stops it; only the policy
 The same file turns off QUIC, DNS-over-HTTPS, WebRTC UDP that does not go
 through the proxy, component updates, and Google's background services
 (autofill, the password manager, sign-in, sync, search suggestions, network
-prediction, metrics, Safe Browsing, translate, spell-check).
+prediction, metrics, Safe Browsing, translate, spell-check). The check below
+proves the ECH key live; the others it holds only as keys in `policy.json`
+(`checkBrowser` requires ECH, QUIC and DNS-over-HTTPS off), and M1 measured
+their effect behind a proxy (agentry-cli#914).
 
 **The user.** The image runs as uid 10001 (`browser`, home `/home/browser`),
 never root, in `/out-browser`, where the runner binds the run's
@@ -700,7 +708,11 @@ seccomp profile refuses under runc; plan §7).
 
 `/etc/agentry/browser/record` names, one a line, the server's version,
 Playwright's, Node's, and the browser's revision, version, architecture and
-archive SHA-256, for the receipt.
+archive SHA-256, for the receipt. The licences are in
+`/usr/share/licenses/agentry-browser`: Node's, the three npm packages'
+(with Playwright's `NOTICE` and `ThirdPartyNotices.txt`), and Chrome for
+Testing's `ABOUT`, which points at the credits the browser carries itself
+(`chrome://credits`).
 
 **The check.** `scripts/check.sh --browser-image <ref>` runs the image the
 way the runner runs its browser server: no network, every capability
@@ -713,6 +725,7 @@ home and `/tmp`, and an output folder bound read-write. It fails unless:
   architecture's browser revision, version and SHA-256;
 - the browser is where the image's Playwright looks, and is the only build
   in `/ms-playwright`;
+- the licences are there;
 - no file is setuid or setgid;
 - `check/probe.mjs`, run inside the image by its own Node and driving its
   `@playwright/mcp` over stdio, as the gateway does, with two servers of its
@@ -720,8 +733,8 @@ home and `/tmp`, and an output folder bound read-write. It fails unless:
   - initialize answers with `source.env`'s Playwright, and `tools/list` holds
     the tools the runner's filter passes first, the testing and PDF ones
     included;
-  - the fixture page renders, and `browser_verify_text_visible` finds its
-    heading;
+  - the fixture page renders, the browser that runs reports the record's
+    Chrome version, and `browser_verify_text_visible` finds its heading;
   - a screenshot and a PDF with chosen names land in `/out-browser`, and a
     name outside it is refused;
   - a secret typed by name (`--secrets`, plan D9) reaches the field, and its

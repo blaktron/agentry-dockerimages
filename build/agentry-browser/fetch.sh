@@ -6,11 +6,20 @@
 #
 # Fails closed: unless browsers.json's chromium revision and version are
 # source.env's, unless the archive's SHA-256 is source.env's for TARGETARCH,
-# and unless the executable is where Playwright's registry expects it
-# (<out>/chromium-<revision>/chrome-linux64/chrome on amd64,
-# chrome-linux-arm64/chrome on arm64). Runs in the Dockerfile's fetch stage,
-# never in a person's run.
+# and unless the executable is where Playwright's registry expects it.
+# Playwright's own installer fetches this same archive (cdn.playwright.dev
+# redirects to Google's bucket); fetching it here is what holds it to a
+# SHA-256. Runs in the Dockerfile's fetch stage, never in a person's run.
+#
+# <out> then holds chromium-<revision>/ (chrome-linux64/ on amd64,
+# chrome-linux-arm64/ on arm64, with the two markers Playwright's installer
+# leaves) and chromium.record, one line the Dockerfile adds to the image's
+# record: `chromium <revision> <version> <arch> <sha256>`.
 set -eu
+[ $# -eq 3 ] || {
+	echo "usage: fetch.sh <source.env> <browsers.json> <out>" >&2
+	exit 2
+}
 env="$1" browsers="$2" out="$3"
 # shellcheck source=/dev/null
 . "$env"
@@ -35,7 +44,8 @@ console.log(b.revision + " " + b.browserVersion);
 [ "$got" = "$CHROMIUM_REVISION $CHROMIUM_VERSION" ] ||
 	refuse "browsers.json names chromium $got; source.env names $CHROMIUM_REVISION $CHROMIUM_VERSION"
 
-zip=/tmp/chrome.zip
+work=$(mktemp -d)
+zip="$work/chrome.zip"
 url="$CHROMIUM_URL/$CHROMIUM_VERSION/$path/$dir.zip"
 echo "fetch $url"
 curl -fsSL --retry 5 --retry-delay 10 --proto '=https' --tlsv1.2 -o "$zip" "$url"
@@ -44,7 +54,7 @@ echo "$sum  $zip" | sha256sum -c - || refuse "$url does not match source.env's S
 target="$out/chromium-$CHROMIUM_REVISION"
 mkdir -p "$target"
 unzip -q "$zip" -d "$target"
-rm -f "$zip"
+rm -rf "$work"
 [ -x "$target/$dir/chrome" ] || refuse "no executable at $target/$dir/chrome"
 # Playwright's own installer leaves these two markers; the registry reads the
 # first as "installed" and the second as "host requirements checked", which

@@ -100,6 +100,8 @@ jobs:
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # Longer than hostlink's 30: Ubuntu's archive for install-deps, a 190 MB
+    # browser archive and a browser check.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -197,6 +199,8 @@ jobs:
       - name: Write the images.tsv row and the signing identity to the run's summary
         run: |
           set -euo pipefail
+          # The role names the pinned server and browser, so it is read from
+          # source.env rather than written here a second time.
           # shellcheck source=/dev/null
           . build/agentry-browser/source.env
           row=$(printf 'agentry-browser\tghcr.io/blaktron/agentry-browser:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \

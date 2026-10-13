@@ -1682,10 +1682,10 @@ browserImage() {
 		bad=1
 	fi
 
-	local sum dirname
+	local sum chromeDir
 	case "$arch" in
-	amd64) sum="$CHROMIUM_SHA256_AMD64" dirname=chrome-linux64 ;;
-	arm64) sum="$CHROMIUM_SHA256_ARM64" dirname=chrome-linux-arm64 ;;
+	amd64) sum="$CHROMIUM_SHA256_AMD64" chromeDir=chrome-linux64 ;;
+	arm64) sum="$CHROMIUM_SHA256_ARM64" chromeDir=chrome-linux-arm64 ;;
 	*)
 		echo "FAIL no browser build for $arch"
 		return 1
@@ -1705,12 +1705,22 @@ browserImage() {
 
 	# Where the image's own Playwright looks, and nothing else under
 	# /ms-playwright: no headless shell, no other browser.
-	if out=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'ls /ms-playwright; test -x /ms-playwright/chromium-'"$CHROMIUM_REVISION"'/'"$dirname"'/chrome && echo executable') &&
+	if out=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'ls /ms-playwright; test -x /ms-playwright/chromium-'"$CHROMIUM_REVISION"'/'"$chromeDir"'/chrome && echo executable') &&
 		[ "$out" = "chromium-$CHROMIUM_REVISION
 executable" ]; then
-		echo "ok   the browser is chromium-$CHROMIUM_REVISION/$dirname/chrome, the only build in /ms-playwright"
+		echo "ok   the browser is chromium-$CHROMIUM_REVISION/$chromeDir/chrome, the only build in /ms-playwright"
 	else
 		echo "FAIL /ms-playwright holds: $out"
+		bad=1
+	fi
+
+	local lic
+	lic="node/LICENSE @playwright/mcp/LICENSE playwright/LICENSE playwright-core/LICENSE playwright-core/NOTICE playwright-core/ThirdPartyNotices.txt chrome-for-testing/ABOUT"
+	# shellcheck disable=SC2016 # $f expands in the container's shell
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'cd /usr/share/licenses/agentry-browser && for f in '"$lic"'; do test -s "$f" || { echo "missing $f"; exit 1; }; done'; then
+		echo "ok   the licences are in /usr/share/licenses/agentry-browser"
+	else
+		echo "FAIL a licence is missing from /usr/share/licenses/agentry-browser"
 		bad=1
 	fi
 
