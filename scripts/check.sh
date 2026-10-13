@@ -34,10 +34,14 @@
 #   - the host link image's PACKAGES names anything but OpenSSH client
 #     packages, or the setuid openssh-keysign, or its Dockerfile does not run
 #     as uid 10001 (build/agentry-hostlink).
+#   - the ripgrep image's source.env does not pin a 40-hex commit and a
+#     version tag, its Dockerfile builds other than the default features or
+#     no longer refuses PCRE2 in the dependency tree, or its fixture tree is
+#     missing (build/ripgrep).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
-# --files-image, --typst-image, --codex-image and --hostlink-image mode,
-# which run the image they name.
+# --files-image, --typst-image, --codex-image, --hostlink-image and
+# --ripgrep-image mode, which run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -114,6 +118,20 @@
 #       and an unknown host key are each refused before any command runs,
 #       and ssh runs as the invoking uid given a passwd line for it. PLATFORM
 #       asks for, and checks, one architecture.
+#   scripts/check.sh --ripgrep-image <ref>
+#       run a built agentry-ripgrep the way the runner's tools server will
+#       (plan ripgrep-search.md §5; agentry-dockerimages#81): no network,
+#       every capability dropped, no new privileges, a read-only root, the
+#       invoking uid, no environment of its own, 512 MiB and every flag
+#       plan §5 fixes, over
+#       build/ripgrep/fixtures/tree. It fails unless rg is source.env's
+#       version without PCRE2, a case-blind search finds exactly the three
+#       files that hold "invoice" (one a .gitignore names, one hidden), a
+#       pattern past the size limit is refused, --files lists every fixture, the binary is static, the licences are
+#       there, and the search under strace (a helper on our alpine mirror,
+#       which needs network to build) makes no network system call and
+#       starts no other program. PLATFORM asks for, and checks, one
+#       architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -774,6 +792,195 @@ EOF
 	return "$bad"
 }
 
+RIPGREP_CTX=build/ripgrep
+
+# checkRipgrep holds the ripgrep image's context to its pins: source.env names
+# a 40-hex upstream commit and a version tag; the Dockerfile builds the rg
+# binary with no --features and refuses a dependency tree naming PCRE2 (plan
+# ripgrep-search.md D9; agentry-dockerimages#81); the image is built per
+# architecture; the fixture tree is there.
+checkRipgrep() {
+	local bad=0
+	(
+		# shellcheck source=/dev/null
+		. "$RIPGREP_CTX/source.env"
+		[[ "${UPSTREAM_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+			echo "$RIPGREP_CTX/source.env: UPSTREAM_COMMIT is not a 40-hex commit: ${UPSTREAM_COMMIT:-}"
+			exit 1
+		}
+		[[ "${UPSTREAM_TAG:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$RIPGREP_CTX/source.env: UPSTREAM_TAG is not a version: ${UPSTREAM_TAG:-}"
+			exit 1
+		}
+		[ "${IMAGE_NAME:-}" = agentry-ripgrep ] && [ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$RIPGREP_CTX/source.env: want IMAGE_NAME=agentry-ripgrep and PLATFORMS=linux/amd64,linux/arm64"
+			exit 1
+		}
+	) || bad=1
+	if ! grep -q '^	cargo build --locked --release --bin rg;' "$RIPGREP_CTX/Dockerfile"; then
+		echo "$RIPGREP_CTX/Dockerfile: does not build rg with the default features (cargo build --locked --release --bin rg)"
+		bad=1
+	elif grep -q -- '--features' "$RIPGREP_CTX/Dockerfile"; then
+		echo "$RIPGREP_CTX/Dockerfile: names --features; only the default features may be built"
+		bad=1
+	fi
+	if ! grep -q 'for c in pcre2 pcre2-sys grep-pcre2 ' "$RIPGREP_CTX/Dockerfile"; then
+		echo "$RIPGREP_CTX/Dockerfile: no longer refuses a dependency tree naming PCRE2"
+		bad=1
+	fi
+	# main.go is named by the tree's own .gitignore, so git tracks it only
+	# because it was added with -f; a fresh copy of the tree that lost it
+	# would no longer prove ignore files are not read.
+	if [ ! -s "$RIPGREP_CTX/fixtures/tree/wiki/concepts/billing.md" ] || [ ! -s "$RIPGREP_CTX/fixtures/tree/main.go" ]; then
+		echo "$RIPGREP_CTX/fixtures/tree: the fixture tree is missing a file (main.go is added with git add -f)"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# ripgrepImage runs a built agentry-ripgrep with the flags the runner's tools
+# server will pass (plan ripgrep-search.md §5): no network, every capability
+# dropped, no new privileges, a read-only root, the invoking uid, an empty
+# environment of its own (only Docker's), 512 MiB, over build/ripgrep/fixtures/tree read-only. (The
+# tools server's own holding, its uid and Landlock, is the CLI's to test.) It
+# fails unless rg reports source.env's version without PCRE2, a case-blind
+# search finds the three files that hold "invoice" (one a .gitignore names,
+# one hidden) as JSON match events and no other, a pattern past the size
+# limit is refused, --files lists every fixture file, the
+# binary is static, the licences are there, and a search under strace makes
+# no network system call. PLATFORM asks for, and checks, one architecture.
+ripgrepImage() {
+	local ref="$1" bad=0 runtime="${CONTAINER:-docker}" out got want tag rc alpine
+	local helper="local/agentry-ripgrep-check:$$"
+	checkRipgrep || return 1
+	tag=$(
+		# shellcheck source=/dev/null
+		. "$RIPGREP_CTX/source.env"
+		echo "$UPSTREAM_TAG"
+	)
+	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: the locals are gone at exit
+	trap "rm -rf '$out'; '$runtime' rmi -f '$helper' >/dev/null 2>&1 || true" EXIT
+	local run=("$runtime" run --rm --network none --cap-drop ALL --security-opt no-new-privileges
+		--security-opt label=disable --read-only --user "$(id -u):$(id -g)" --env-file /dev/null
+		--memory 512m ${PLATFORM:+--platform "$PLATFORM"}
+		-v "$PWD/$RIPGREP_CTX/fixtures/tree:/in:ro")
+	# Plan §5's fixed flags, every one: the two size limits bound what a
+	# model's pattern may compile to.
+	# --json is the search's; the listing (--files) takes the rest.
+	local flags=(--no-config --no-ignore --hidden --glob '!.git' --max-filesize 8M
+		--max-columns 400 --max-columns-preview --threads 2 --regex-size-limit 16M --dfa-size-limit 64M)
+
+	got=$("${run[@]}" "$ref" --version 2>&1) || got=""
+	if grep -qx "ripgrep $tag" <<<"$(head -1 <<<"$got")" && grep -qF 'PCRE2 is not available' <<<"$got"; then
+		echo "ok   rg --version: ripgrep $tag, no PCRE2"
+	else
+		echo "FAIL rg --version is not ripgrep $tag without PCRE2:"
+		head -6 <<<"$got" | sed 's/^/     /'
+		bad=1
+	fi
+
+	if "${run[@]}" "$ref" --json "${flags[@]}" --ignore-case -e invoice -- /in >"$out/json" 2>"$out/err"; then
+		got=$(python3 - "$out/json" <<'EOF'
+import json, sys
+paths = set()
+for line in open(sys.argv[1]):
+    event = json.loads(line)
+    if event.get("type") == "match":
+        # A path that is not UTF-8 comes as "bytes", never in a fixture.
+        paths.add(event["data"]["path"].get("text", "<bytes>"))
+print(" ".join(sorted(paths)))
+EOF
+)
+		want="/in/.hidden/note.txt /in/main.go /in/wiki/concepts/billing.md"
+		if [ "$got" = "$want" ]; then
+			echo "ok   a case-blind search found exactly: $got"
+		else
+			echo "FAIL a case-blind search found \"$got\", want \"$want\""
+			bad=1
+		fi
+	else
+		echo "FAIL the search did not run:"
+		sed 's/^/     /' "$out/err" | head -6
+		bad=1
+	fi
+
+	rc=0
+	"${run[@]}" "$ref" "${flags[@]}" -e 'a{1000}{1000}' -- /in >/dev/null 2>"$out/err" || rc=$?
+	if [ "$rc" -eq 2 ] && grep -qF 'exceeds size limit' "$out/err"; then
+		echo "ok   a pattern past the size limit is refused: $(head -1 "$out/err")"
+	else
+		echo "FAIL a pattern past --regex-size-limit was not refused (exit $rc):"
+		sed 's/^/     /' "$out/err" | head -4
+		bad=1
+	fi
+
+	got=$("${run[@]}" "$ref" "${flags[@]}" --files -- /in 2>&1 | sort | tr '\n' ' ')
+	want=$(cd "$RIPGREP_CTX/fixtures/tree" && find . -type f | sed 's|^\.|/in|' | sort | tr '\n' ' ')
+	if [ "$got" = "$want" ]; then
+		echo "ok   --files lists every fixture file"
+	else
+		echo "FAIL --files listed \"$got\", want \"$want\""
+		bad=1
+	fi
+
+	# The image's files in a helper from our alpine mirror with strace and
+	# file. Building it needs network; the traced run has none.
+	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print $3 }' "$MANIFEST")
+	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.22@$alpine"
+	# shellcheck disable=SC2016 # ${RG} and ${ALPINE} are the Dockerfile's
+	if ! printf 'ARG RG\nARG ALPINE\nFROM ${RG} AS rg\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=rg /rg /rg\nCOPY --from=rg /licenses /licenses\n' |
+		"$runtime" build -q ${PLATFORM:+--platform "$PLATFORM"} --build-arg RG="$ref" --build-arg ALPINE="$alpine" -t "$helper" - >/dev/null; then
+		echo "FAIL could not build the strace helper from $alpine"
+		return 1
+	fi
+	want=""
+	case "${PLATFORM:-}" in
+	*/amd64) want="x86-64" ;;
+	*/arm64) want="aarch64" ;;
+	esac
+	got=$("$runtime" run --rm --network none "$helper" file -b /rg) || got=""
+	echo "     file: $got"
+	if [[ "$got" == *"static"* ]] && [[ "$got" != *"dynamically"* ]] && [[ -z "$want" || "$got" == *"$want"* ]]; then
+		echo "ok   /rg is a static ${want:-binary}"
+	else
+		echo "FAIL /rg is not a static ${want:-binary}"
+		bad=1
+	fi
+	if "$runtime" run --rm --network none "$helper" sh -c 'test -s /licenses/ripgrep/LICENSE-MIT && test -s /licenses/ripgrep/UNLICENSE && test -s /licenses/crates/crates.tsv'; then
+		echo "ok   the licences are in /licenses"
+	else
+		echo "FAIL /licenses lacks ripgrep's licence files or the crate list"
+		bad=1
+	fi
+	"$runtime" run --rm --network none --cap-add SYS_PTRACE --security-opt label=disable \
+		-v "$PWD/$RIPGREP_CTX/fixtures/tree:/in:ro" "$helper" sh -c \
+		'strace -f -qq -e trace=%network,execve -o /tmp/trace /rg "$@" >/tmp/log 2>&1; echo "exit $?" >>/tmp/log; cat /tmp/trace; echo "--- rg"; cat /tmp/log' \
+		sh --json "${flags[@]}" --ignore-case -e invoice -- /in >"$out/trace" 2>&1 || true
+	got=$(sed '/^--- rg$/,$d' "$out/trace")
+	if ! grep -q 'execve("/rg"' <<<"$got"; then
+		echo "FAIL strace did not trace the search:"
+		sed 's/^/     /' "$out/trace" | head -8
+		bad=1
+	elif grep -v 'execve(' <<<"$got" | grep -q .; then
+		echo "FAIL the search made network system calls:"
+		grep -v 'execve(' <<<"$got" | sed 's/^/     /' | head -8
+		bad=1
+	elif [ "$(grep -c 'execve(' <<<"$got")" -ne 1 ]; then
+		echo "FAIL the search started another program:"
+		head -8 <<<"$got" | sed 's/^/     /'
+		bad=1
+	elif ! grep -qx 'exit 0' "$out/trace"; then
+		echo "FAIL the traced search did not find its matches:"
+		sed -n '/^--- rg$/,$p' "$out/trace" | sed 's/^/     /' | tail -6
+		bad=1
+	else
+		echo "ok   the traced search made no network system call and started no other program"
+	fi
+	return "$bad"
+}
+
 CODEX_CTX=build/agentry-codex
 
 # checkCodex holds the Codex image's context to its pins: source.env names a
@@ -1285,7 +1492,7 @@ hostlinkImage() {
 
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink; do
+	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -1327,6 +1534,9 @@ codexcontrol checkCodex
 hostlinkkeysign checkHostlink
 hostlinkextra checkHostlink
 hostlinkuser checkHostlink
+ripgrepcommit checkRipgrep
+ripgrepfeatures checkRipgrep
+ripgreppcre checkRipgrep
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -1361,6 +1571,9 @@ breakCase() {
 	hostlinkkeysign) sed -i 's/^ARG PACKAGES="/&openssh-keysign /' build/agentry-hostlink/Dockerfile ;;
 	hostlinkextra) sed -i 's/^ARG PACKAGES="/&sshpass /' build/agentry-hostlink/Dockerfile ;;
 	hostlinkuser) sed -i '/^USER 10001:10001$/d' build/agentry-hostlink/Dockerfile ;;
+	ripgrepcommit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=master/' build/ripgrep/source.env ;;
+	ripgrepfeatures) sed -i 's/--bin rg;/--bin rg --features pcre2;/' build/ripgrep/Dockerfile ;;
+	ripgreppcre) sed -i 's/for c in pcre2 pcre2-sys grep-pcre2 /for c in /' build/ripgrep/Dockerfile ;;
 	esac
 }
 
@@ -1429,6 +1642,13 @@ case "${1:-}" in
 	}
 	hostlinkImage "$2"
 	;;
+--ripgrep-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --ripgrep-image <ref>" >&2
+		exit 2
+	}
+	ripgrepImage "$2"
+	;;
 --clamav-db)
 	if [ $# -ne 3 ] || [ ! -d "$2" ]; then
 		echo "usage: scripts/check.sh --clamav-db <dir> <files-ref>" >&2
@@ -1438,7 +1658,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --ripgrep-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
