@@ -1,0 +1,8 @@
+{
+  "name": "agentry-browser",
+  "private": true,
+  "description": "The browser server of the agentry-browser image: Microsoft's @playwright/mcp, pinned by package-lock.json",
+  "dependencies": {
+    "@playwright/mcp": "0.0.83"
+  }
+}
