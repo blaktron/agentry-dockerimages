@@ -21,6 +21,7 @@ unchanged and pinned by digest, or built here from a pinned upstream commit.
 | `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
 | `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
 | `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
+| `agentry-ripgrep` (first build pending) | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed by its workflow once built ([below](#the-ripgrep-image)) |
 
 Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
@@ -28,8 +29,8 @@ Three more mirrors are needed only to build `agentry-docker-agent-src`:
 `agentry-harness-golang:1.27.2-alpine3.23` (`golang:1.27.2-alpine3.23`).
 One more is needed only to build `agentry-unsafe-kali`:
 `agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
-And one only to build `agentry-typst`: `agentry-rust-alpine:1.98.1-alpine3.22`
-(`rust:1.98.1-alpine3.22`).
+And one only to build `agentry-typst` and `agentry-ripgrep`:
+`agentry-rust-alpine:1.98.1-alpine3.22` (`rust:1.98.1-alpine3.22`).
 And one only to build `agentry-codex`: `agentry-cosign:v3.1.3`
 (`ghcr.io/sigstore/cosign/cosign:v3.1.3`), whose binary verifies OpenAI's
 signature on the Codex release in the build's fetch stage
@@ -120,6 +121,10 @@ The `typst` workflow likewise creates `agentry-typst`, which the runner image
 copies from and so must need no login, and its build-time base
 `agentry-rust-alpine`.
 
+The `ripgrep` workflow creates `agentry-ripgrep`, which the runner image
+copies from and so must need no login; its build-time base is
+`agentry-rust-alpine`, as Typst's is.
+
 The `codex` workflow creates `agentry-codex`, which the CLI pulls for a
 ChatGPT model sign-in and so must need no login, and its build-time base
 `agentry-cosign`.
@@ -161,7 +166,7 @@ base is the default built into the CLI and cannot be changed from
 |---|---|
 | `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
 | `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, the files image's fixture list and the host link image's package list, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). `--hostlink-image <ref>` runs a built `agentry-hostlink` hardened against a throwaway OpenSSH server on an internal network ([below](#the-host-link-image)). |
+| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, the files image's fixture list the host link image's package list and the ripgrep image's pins, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). `--hostlink-image <ref>` runs a built `agentry-hostlink` hardened against a throwaway OpenSSH server on an internal network ([below](#the-host-link-image)). `--ripgrep-image <ref>` runs a built `agentry-ripgrep` with the flags the runner will pass, hardened and with no network, over a fixture tree, and traces it ([below](#the-ripgrep-image)). |
 | `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
 
 `REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
@@ -177,7 +182,7 @@ pulls no image and needs no credentials.
 
 The `images` workflow runs the same steps, then mirrors every `mirror` row
 and builds every context in `build/` except those built per architecture,
-which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`, `hostlink`). It is started by hand, and it
+which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`, `hostlink`, `ripgrep`). It is started by hand, and it
 logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
 secrets are set.
 
@@ -841,6 +846,49 @@ the named context `agentry`. That is how the patch, `fetch.tsv` and
 `fetch.sh` reach the Dockerfile without being mixed into Typst's tree. A
 local build needs several GB of disk; on 2026-10-08 the release build took
 12 minutes on the 8-core workstation.
+
+## The ripgrep image
+
+`build/ripgrep/` builds [ripgrep](https://github.com/BurntSushi/ripgrep)
+`15.2.0` at commit `e89fff89ac9af12e8d4ce9d5fd07beb408ca730f` from source
+(agentry-dockerimages#81; agentry-notes `plans/ripgrep-search.md` D1, D3,
+D9), on the same digest-pinned `agentry-rust-alpine` builder Typst uses, with
+its default features only: no PCRE2. The Dockerfile refuses a dependency tree
+that names one of a list of crates (PCRE2's and the common network clients'),
+and a binary that needs a shared library or an interpreter. On 64-bit musl ripgrep links jemalloc, which its
+build compiles from the vendored source (upstream's choice, kept).
+
+The result, `agentry-ripgrep`, holds only files, for agentry-cli's runner
+image to `COPY --from=ghcr.io/blaktron/agentry-ripgrep@<digest>`, where the
+tools server will run it for `grep` and `glob` with a fixed argument list
+that never asks it to start another program (agentry-cli#912):
+
+| Path | What |
+|---|---|
+| `/rg` | the static binary; also the entrypoint, so the checks can run the image |
+| `/licenses/` | ripgrep's `COPYING`, `LICENSE-MIT` and `UNLICENSE`, and the licence files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv`) |
+
+`scripts/check.sh --ripgrep-image <ref>` runs it the way the tools server
+will call it, with every flag the plan fixes (`--json --no-config --no-ignore
+--hidden --glob '!.git'` and the size, column, thread and regex caps): no
+network, every capability dropped, no new privileges, a read-only root, the
+invoking uid, no environment of its own and 512 MiB, over
+`build/ripgrep/fixtures/tree`. It holds the version (without PCRE2), a
+case-blind search to exactly the three fixture files that hold the word (one
+named by a `.gitignore`, one hidden), a pattern past the size limit to being
+refused, `--files` to every fixture, the binary to static, the licences to
+being there, and a traced search to no network system call and no second
+`execve`. That shows this invocation starts no program; that the tools
+server never passes a flag that would (`--pre`, `--search-zip`) is the CLI's
+to hold and test. The tools server's own holding (its uid, Landlock, the
+time limit) is the CLI's too.
+
+A local amd64 build on the workstation (2026-10-13) passed every check: 27
+crates linked, each with its licence file; a static-pie binary; an image of
+9,275,888 bytes. The `ripgrep` workflow (dispatched from `main`) builds both
+architectures natively, checks each, joins them, signs the joined digest
+keyless and verifies the signature; its run's summary prints the
+`images.tsv` row. The pinned build is recorded here when it exists.
 
 ## Licence
 

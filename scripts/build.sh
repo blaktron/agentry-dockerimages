@@ -10,7 +10,8 @@
 #
 # A context's source.env says what it builds:
 #   UPSTREAM_REPO, UPSTREAM_COMMIT, UPSTREAM_TAG   an upstream repository to
-#       clone at a pinned commit (build/docker-agent/, build/typst/), with the
+#       clone at a pinned commit (build/docker-agent/, build/typst/,
+#       build/ripgrep/), with the
 #       context directory passed as the named build context `agentry`;
 #       without them the context directory itself is the build context
 #       (build/agentry-unsafe-kali/)
