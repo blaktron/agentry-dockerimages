@@ -1,8 +1,7 @@
 # Build, check, sign and publish agentry-typst to ghcr.io/blaktron. It holds
 # Typst built from pinned source without its package downloader, the Noto
 # fonts and the cmarker package, files only, which the runner image copies by
-# digest for export_pdf (agentry-notes plans/scratch-and-pdf-reports.md §5,
-# D23, D25, D26, D27; agentry-dockerimages#48).
+# digest for export_pdf.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -56,7 +55,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

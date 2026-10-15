@@ -1,8 +1,7 @@
 # Build, check, sign and publish agentry-codex, the Codex harness image, to
 # ghcr.io/blaktron. It holds OpenAI's Codex CLI release binary, verified
 # against OpenAI's keyless sigstore signature, on our Alpine mirror; the CLI's
-# codex container adapter runs it for a ChatGPT model sign-in (agentry-notes
-# plans/model-sign-ins.md §4.3, D5, D11; agentry-dockerimages#53).
+# codex container adapter runs it for a ChatGPT model sign-in.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold. The guard is a step in this file, so a
@@ -66,7 +65,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

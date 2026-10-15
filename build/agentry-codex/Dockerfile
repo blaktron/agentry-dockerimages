@@ -1,8 +1,6 @@
 # agentry-codex: the Codex harness image, OpenAI's Codex CLI release binary
-# on our Alpine mirror (agentry-dockerimages#53; agentry-notes
-# plans/model-sign-ins.md §4.3, D5, D11). The CLI's codex container adapter
-# runs it for a ChatGPT model sign-in, and on an OpenAI key when a policy
-# picks it (agentry-cli#739).
+# on our Alpine mirror. The CLI's codex container adapter runs it for a
+# ChatGPT model sign-in, and on an OpenAI key when a policy picks it.
 #
 #   upstream   github.com/openai/codex, the release at CODEX_TAG (source.env)
 #   licence    Apache-2.0; LICENSE and NOTICE at CODEX_COMMIT are in the image
@@ -33,8 +31,7 @@
 # refuses its helper links (codex-rs/arg0).
 # No bwrap is installed. Codex's own sandbox code is in the binary, but it
 # starts only for a shell or patch tool, which the adapter does not offer
-# (plan §3 I1, the adapter's to keep), and its start-up check only warns
-# (plan D5; research option-b-codex-image.md R4).
+# (the adapter's to keep), and its start-up check only warns.
 #
 # No `# syntax=` line: the Dockerfile frontend built into BuildKit reads this,
 # so no frontend image is pulled from a floating tag.

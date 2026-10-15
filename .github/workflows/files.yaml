@@ -1,6 +1,5 @@
 # Build, check, sign and publish agentry-files, the files image the runner's
-# decode step runs (agentry-notes plans/file-handling.md §4, D3, D4;
-# agentry-dockerimages#28), to ghcr.io/blaktron.
+# decode step runs, to ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -10,7 +9,7 @@
 #
 # The image is Alpine (our mirror of alpine:3.22, the runner image's own
 # runtime base) with the decoders added by apk. The CDN fetch happens here,
-# once, and never inside a person's run (plan §1.1).
+# once, and never inside a person's run.
 #
 # Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
 # ubuntu-24.04-arm, and every fixture is decoded inside it, the way the CLI's
@@ -57,7 +56,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

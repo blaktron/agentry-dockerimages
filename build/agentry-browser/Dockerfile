@@ -1,7 +1,6 @@
 # agentry-browser: the browser server image, Microsoft's @playwright/mcp and
 # the Chrome for Testing build of the Playwright it pins, for a QuickAgent that
-# declares capabilities.browser (agentry-notes plans/browser-testing.md §4, §7,
-# D3, D5, D14; agentry-dockerimages#82).
+# declares capabilities.browser.
 #
 # The runner starts it as a server in the run's gateway, behind one relay to
 # the run's browse proxy, its only route out; nothing here opens a network.
@@ -18,12 +17,12 @@
 #                        playwright-core names, held to source.env's SHA-256
 #                        (fetch.sh). The full build, not the headless shell:
 #                        @playwright/mcp's --browser chromium launches it, and
-#                        the shell ignores enterprise policies (M1)
+#                        the shell ignores enterprise policies
 #   /etc/opt/chrome_for_testing/policies/managed/agentry.json
 #                        the Chrome policy (policy.json), the one path this
 #                        build reads. EncryptedClientHelloEnabled false is
 #                        what lets the browse proxy's SNI check pass: no
-#                        launch flag stops Chromium's GREASE ECH (M1). The
+#                        launch flag stops Chromium's GREASE ECH. The
 #                        rest turns off QUIC, DNS-over-HTTPS, non-proxied
 #                        WebRTC UDP and Google's background services
 #   /etc/agentry/browser/record
@@ -50,7 +49,7 @@
 # It runs as uid 10001 (browser), never root. WORKDIR is /out-browser, where
 # the runner binds the run's reports/browser/: @playwright/mcp resolves a file
 # name the model chooses against its working directory, and the gateway's
-# catalog cannot set one (M1).
+# catalog cannot set one.
 #
 # scripts/build.sh passes UBUNTU_IMAGE and NODE_IMAGE as our digest-pinned
 # mirrors (bases.env).

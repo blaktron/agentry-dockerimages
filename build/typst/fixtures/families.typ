@@ -1,8 +1,7 @@
 // The design families' fixture of scripts/check.sh --typst-image: a block per
-// family the report designs may name (agentry-notes plans/report-designs.md,
-// D3, D13; agentry-dockerimages#58), set in that family, in regular,
-// bold, italic and bold italic, with a line of Chinese, Arabic and Hindi that
-// the family lacks and Noto must draw. The check passes every family of
+// family the report designs may name, set in that family, in regular, bold,
+// italic and bold italic, with a line of Chinese, Arabic and Hindi that the
+// family lacks and Noto must draw. The check passes every family of
 // fonts.txt whose name does not start with "Noto" as the input `families`
 // (separated by "|"), and holds the PDF to embedding each one and the three
 // Noto fallbacks.

@@ -1,10 +1,9 @@
-// The fixture template of scripts/check.sh --typst-image: report.md (the
-// 2026-10-08 prototype's sample, plus a line per further script) rendered
-// through the vendored cmarker with the bundled fonts only. It is not the
-// runner's template, which is agentry-cli's (plan scratch-and-pdf-reports §5,
-// M3), but it holds the two settings that one must: raw-typst is false, so
-// the Markdown can never inject Typst code, and every image carries its alt
-// text, which a PDF/UA-1 document needs.
+// The fixture template of scripts/check.sh --typst-image: report.md (a
+// sample report, plus a line per further script) rendered through the
+// vendored cmarker with the bundled fonts only. It is not the runner's
+// template, which is agentry-cli's, but it holds the two settings that one
+// must: raw-typst is false, so the Markdown can never inject Typst code, and
+// every image carries its alt text, which a PDF/UA-1 document needs.
 #import "@preview/cmarker:0.1.10"
 
 // Colour emoji straight after the text font: the first family that has a
@@ -30,7 +29,7 @@
 #show heading.where(level: 1): set text(font: ("Noto Serif", ..fallback))
 #set table(inset: 4pt, stroke: 0.4pt + luma(190))
 #show table.cell.where(y: 0): set text(weight: "bold")
-// Break over-long tokens, as the prototype did.
+// Break over-long tokens.
 #show regex("\\S{36,}"): it => it.text.clusters().join(sym.zws)
 
 #cmarker.render(
