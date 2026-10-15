@@ -1,7 +1,6 @@
 # Build, check, sign and publish agentry-hostlink, the host link image: the
-# OpenSSH client the runner's host link uses to reach a target host
-# (agentry-notes plans/runtime-hosts.md §4, D3, D5; agentry-dockerimages#71),
-# to ghcr.io/blaktron.
+# OpenSSH client the runner's host link uses to reach a target host, to
+# ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -60,7 +59,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -193,7 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-hostlink\tghcr.io/blaktron/agentry-hostlink:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the host link image: the OpenSSH client (ssh, sftp, ssh-keyscan, ssh-keygen) the runner's host link reaches a target host with, on our alpine:3.22 mirror, uid 10001, amd64 and arm64, signed keyless by the hostlink workflow (agentry-cli's host link, agentry-cli#861)")
+            "the host link image: the OpenSSH client (ssh, sftp, ssh-keyscan, ssh-keygen) the runner's host link reaches a target host with, on our alpine:3.22 mirror, uid 10001, amd64 and arm64, signed keyless by the hostlink workflow (agentry-cli's host link)")
           {
             echo "### agentry-hostlink:$IMAGE_TAG"
             echo

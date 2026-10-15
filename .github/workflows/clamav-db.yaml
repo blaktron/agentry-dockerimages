@@ -1,13 +1,12 @@
 # Fetch, check, sign and publish the ClamAV signature bundle, daily, to
-# ghcr.io/blaktron/agentry-clamav-db (agentry-notes plans/file-handling.md §7,
-# D15; agentry-dockerimages#30).
+# ghcr.io/blaktron/agentry-clamav-db.
 #
 # The runner's decode step checks every input with clamscan inside the files
 # image, which has no network, so its signatures come from outside: this
 # bundle, which the CLI refreshes when its copy is over 24 hours old, verifies
 # against this workflow's keyless signature, and mounts read-only into the
-# decode container (agentry-cli#563). Past 7 days without a newer bundle, runs
-# go on and the receipt says the signatures are stale (D15).
+# decode container. Past 7 days without a newer bundle, runs go on and the
+# receipt says the signatures are stale.
 #
 # Each run fetches Cisco Talos's databases with freshclam into an empty
 # directory (main.cvd, daily.cvd and bytecode.cvd, each a signed CVD that
@@ -67,7 +66,7 @@ jobs:
           echo "::error::run this workflow from main; it pushes and signs a public bundle"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

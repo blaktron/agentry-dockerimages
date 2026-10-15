@@ -3,8 +3,7 @@
 # Every URL names a commit, never a branch, and fetch.sh refuses a file whose
 # SHA-256 differs. The image copies this file to /licenses/fetch.tsv.
 #
-# fonts/: the Noto set for every script the reports may hold (plan
-# scratch-and-pdf-reports D25), all OFL-1.1:
+# fonts/: the Noto set for every script the reports may hold, all OFL-1.1:
 #   - notofonts/notofonts.github.io @ 7838e6da (2026-09-22), the Noto project's
 #     published builds, hinted TTF: Latin, Greek and Cyrillic (Sans, Serif,
 #     Mono), Arabic, Hebrew, Thai, Devanagari and eight more Indic scripts,
@@ -13,8 +12,7 @@
 #     Simplified Chinese (SC) and Korean (KR);
 #   - googlefonts/noto-emoji @ 8998f5dd (tag v2.051, 2025-09-15), the COLRv1
 #     colour emoji.
-# fonts/ also holds the report designs' fourteen families (agentry-notes
-# plans/report-designs.md D3, D13; agentry-dockerimages#58), all OFL-1.1, from
+# fonts/ also holds the report designs' fourteen families, all OFL-1.1, from
 # google/fonts @ 62e55e58 (2026-10-09), Google Fonts' published build of each
 # family, whose names the site's editor also uses for its web fonts: Inter,
 # IBM Plex Sans, Source Sans 3, Work Sans, Montserrat; Source Serif 4, Lora,

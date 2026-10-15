@@ -1,5 +1,4 @@
-# ripgrep, built from pinned upstream source, as a files-only image
-# (agentry-notes plans/ripgrep-search.md D1, D3, D9; agentry-dockerimages#81).
+# ripgrep, built from pinned upstream source, as a files-only image.
 #
 #   upstream   github.com/BurntSushi/ripgrep
 #   commit     source.env beside this file
@@ -12,7 +11,7 @@
 #
 #   1. The base is an ARG, and scripts/build.sh passes our digest-pinned
 #      mirror for it (the Rust builder Typst uses).
-#   2. Default features only: no `pcre2` (plan D9), so no C regex library is
+#   2. Default features only: no `pcre2`, so no C regex library is
 #      linked in. The dependency check below refuses a build whose tree names
 #      PCRE2 or a network client.
 #   3. Native builds only, one architecture per run. The binary is checked to

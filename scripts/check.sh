@@ -58,37 +58,33 @@
 #       read the command index and the extras list out of a built
 #       agentry-unsafe-kali and assert that every command in
 #       build/agentry-unsafe-kali/fixture-commands.txt resolves through one of
-#       them (plan unsafe-mode.md §4.1), list the commands the index left
-#       out as ambiguous, and fail when a program on the image's own PATH has
-#       no row in the index, the ambiguous list or base-unowned.txt
-#       (agentry-dockerimages#23). This one pulls and runs the image: CONTAINER names
-#       the runtime (default docker; Apple's `container` on the Mac build
-#       host), and PLATFORM (e.g. linux/arm64) asks for, and checks, one
-#       architecture. It runs under macOS's bash 3.2.
+#       them, list the commands the index left out as ambiguous, and fail
+#       when a program on the image's own PATH has no row in the index, the
+#       ambiguous list or base-unowned.txt. This one pulls and runs the
+#       image: CONTAINER names the runtime (default docker; Apple's
+#       `container` on macOS), and PLATFORM (e.g. linux/arm64) asks for, and
+#       checks, one architecture. It runs under macOS's bash 3.2.
 #   scripts/check.sh --files-image <ref>
 #       decode each fixture in build/agentry-files/fixtures/ inside a built
 #       agentry-files, with the argv the runner's decode role uses
 #       (agentry-cli runnerimage/decode), with no network, every capability
-#       dropped and a read-only root, and assert the phrase expect.tsv names
-#       (plan file-handling.md §4; agentry-dockerimages#28), as the invoking
-#       uid with the decode container's environment and limits. It prints the
+#       dropped and a read-only root, and assert the phrase expect.tsv names,
+#       as the invoking uid with the decode container's environment and limits. It prints the
 #       package record and fails on any setuid or setgid file. PLATFORM
 #       (e.g. linux/arm64) asks for, and checks, one architecture. It also
 #       runs clamscan, with the argv the decode role uses, against a one-line
 #       signature database made here (the EICAR test file's MD5), and fails
 #       unless the EICAR file and a zip of it are found and every fixture is
-#       clean (agentry-dockerimages#30).
+#       clean.
 #   scripts/check.sh --typst-image <ref>
 #       run a built agentry-typst with no network, every capability dropped,
-#       a read-only root and the invoking uid (plan scratch-and-pdf-reports
-#       §5, D24, D26, D27; agentry-dockerimages#48): `typst fonts` must list
+#       a read-only root and the invoking uid: `typst fonts` must list
 #       every family in build/typst/fixtures/fonts.txt; the fixture report
 #       (CJK, Arabic, Hindi and more, emoji, a table, code and a local image,
 #       through the vendored cmarker with raw-typst off) must render to a
 #       PDF/UA-1 PDF, and to PNG pages; families.typ, a block in each report
-#       design's family (every family of fonts.txt not named Noto; plan
-#       report-designs D13, agentry-dockerimages#58) with Chinese, Arabic and
-#       Hindi behind it, must render to a PDF/UA-1 PDF with no unknown-family
+#       design's family (every family of fonts.txt not named Noto) with
+#       Chinese, Arabic and Hindi behind it, must render to a PDF/UA-1 PDF with no unknown-family
 #       warning that embeds every one of those families and the three Noto
 #       fallbacks, and to PNG pages; the PDFs and PNG pages land in $OUT_DIR
 #       when it is set so a person can look at them; and an @preview import
@@ -101,8 +97,8 @@
 #   scripts/check.sh --codex-image <ref>
 #       run a built agentry-codex hardened, as the CLI runs a harness (no
 #       network, every capability dropped, no new privileges, a read-only
-#       root, the image's own user, CODEX_HOME on a tmpfs;
-#       agentry-dockerimages#53), and fail unless the user is not root,
+#       root, the image's own user, CODEX_HOME on a tmpfs), and fail unless
+#       the user is not root,
 #       `codex --version` prints source.env's version, Codex writes to
 #       CODEX_HOME, LICENSE, NOTICE, the release record and the signature
 #       bundle are present, no file is setuid or setgid, the binary is static,
@@ -112,9 +108,8 @@
 #   scripts/check.sh --hostlink-image <ref>
 #       run a built agentry-hostlink hardened, as the runner runs a host link
 #       (every capability dropped, no new privileges, a read-only root, the
-#       image's own user, the credentials bound read-only; plan
-#       runtime-hosts.md D5, agentry-dockerimages#71), against a throwaway
-#       OpenSSH server (our alpine mirror with openssh-server, which needs
+#       image's own user, the credentials bound read-only), against
+#       a throwaway OpenSSH server (our alpine mirror with openssh-server, which needs
 #       network to build) on an internal network with no route out. It fails
 #       unless the user is uid 10001, the package record names each of
 #       PACKAGES, apk's world is the base's plus PACKAGES, no file is setuid
@@ -127,24 +122,21 @@
 #       and ssh runs as the invoking uid given a passwd line for it. PLATFORM
 #       asks for, and checks, one architecture.
 #   scripts/check.sh --ripgrep-image <ref>
-#       run a built agentry-ripgrep the way the runner's tools server will
-#       (plan ripgrep-search.md §5; agentry-dockerimages#81): no network,
-#       every capability dropped, no new privileges, a read-only root, the
-#       invoking uid, no environment of its own, 512 MiB and every flag
-#       plan §5 fixes, over
-#       build/ripgrep/fixtures/tree. It fails unless rg is source.env's
-#       version without PCRE2, a case-blind search finds exactly the three
-#       files that hold "invoice" (one a .gitignore names, one hidden), a
-#       pattern past the size limit is refused, --files lists every fixture, the binary is static, the licences are
-#       there, and the search under strace (a helper on our alpine mirror,
-#       which needs network to build) makes no network system call and
-#       starts no other program. PLATFORM asks for, and checks, one
-#       architecture.
+#       run a built agentry-ripgrep the way the runner's tools server will:
+#       no network, every capability dropped, no new privileges, a read-only
+#       root, the invoking uid, no environment of its own, 512 MiB and every
+#       flag the runner fixes, over build/ripgrep/fixtures/tree. It fails unless
+#       rg is source.env's version without PCRE2, a case-blind search finds
+#       exactly the three files that hold "invoice" (one a .gitignore names, one
+#       hidden), a pattern past the size limit is refused, --files lists every
+#       fixture, the binary is static, the licences are there, and the search
+#       under strace (a helper on our alpine mirror, which needs network to
+#       build) makes no network system call and starts no other program.
+#       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --browser-image <ref>
 #       run a built agentry-browser hardened, as the runner runs its browser
-#       server (plan browser-testing.md §7; agentry-dockerimages#82): no
-#       network, every capability dropped, no new privileges, a read-only
-#       root, uid 10001, a tmpfs home and /tmp, an output folder bound
+#       server: no network, every capability dropped, no new privileges, a
+#       read-only root, uid 10001, a tmpfs home and /tmp, an output folder bound
 #       read-write. It fails unless the working directory is /out-browser,
 #       the record names source.env's server, Playwright and this
 #       architecture's browser and SHA-256, the browser is the only build in
@@ -499,8 +491,8 @@ unsafeImage() {
 		fi
 	fi
 	echo "$ref ($arch): $(grep -vc '^#' "$tmp/commands.tsv") commands indexed, $(grep -vc '^#' "$tmp/ambiguous.tsv") ambiguous and left out:"
-	# The ambiguities, as command(packages), wrapped: the plan has check.sh
-	# report what the index leaves out rather than guess.
+	# The ambiguities, as command(packages), wrapped: check.sh reports what
+	# the index leaves out rather than guessing.
 	awk -F'\t' '!/^#/ { printf "%s(%s) ", $1, $2 } END { print "" }' "$tmp/ambiguous.tsv" | fold -s -w 100 | sed 's/^/     /'
 	while read -r cmd; do
 		case "$cmd" in '' | \#*) continue ;; esac
@@ -515,7 +507,7 @@ unsafeImage() {
 		fi
 	done <"$UNSAFE_CTX/fixture-commands.txt"
 	[ "$bad" -eq 0 ] && echo "ok   all $n fixture commands resolve on $arch"
-	# Every program on the base's own PATH has a row (agentry-dockerimages#23):
+	# Every program on the base's own PATH has a row:
 	# in the index, in the ambiguous list, or named in base-unowned.txt. One
 	# without would be called unavailable by the CLI although the run can
 	# start it. The directories are the image's ENV PATH, as make-index.py's
@@ -610,15 +602,13 @@ checkTypst() {
 }
 
 # designFamilies prints the report designs' families, one a line: every family
-# of fixtures/fonts.txt whose name does not start with "Noto" (plan
-# report-designs D13).
+# of fixtures/fonts.txt whose name does not start with "Noto".
 designFamilies() {
 	grep -vE '^(#|[[:space:]]*$|Noto )' "$TYPST_CTX/fixtures/fonts.txt" || true
 }
 
 # typstImage runs a built agentry-typst the way the runner's export_pdf will
-# (plan scratch-and-pdf-reports §5: no network, the invoking uid, every
-# capability dropped, a read-only root, a fixed argv with only the bundled
+# (no network, the invoking uid, every capability dropped, a read-only root, a fixed argv with only the bundled
 # fonts and packages), over build/typst/fixtures/. Then it runs the import
 # probe and the report again under strace, in a helper holding the image's
 # files, so "no network call" is observed rather than only blocked.
@@ -690,8 +680,7 @@ EOF
 	fi
 
 	# Each report design's family, with Noto behind it for Chinese, Arabic and
-	# Hindi (plan report-designs D3, D13). A family the image lacks is only a
-	# warning to Typst, which then sets the text in the next family, so the
+	# Hindi. A family the image lacks is only a warning to Typst, which then sets the text in the next family, so the
 	# warning fails the check, and so does a PDF that does not embed the family
 	# (by its PostScript name, the family's name without spaces; a variable
 	# font's is its default instance's, e.g. Montserrat-Thin, which is only
@@ -820,9 +809,8 @@ RIPGREP_CTX=build/ripgrep
 
 # checkRipgrep holds the ripgrep image's context to its pins: source.env names
 # a 40-hex upstream commit and a version tag; the Dockerfile builds the rg
-# binary with no --features and refuses a dependency tree naming PCRE2 (plan
-# ripgrep-search.md D9; agentry-dockerimages#81); the image is built per
-# architecture; the fixture tree is there.
+# binary with no --features and refuses a dependency tree naming PCRE2; the image is built per architecture; the fixture tree is
+# there.
 checkRipgrep() {
 	local bad=0
 	(
@@ -863,16 +851,16 @@ checkRipgrep() {
 }
 
 # ripgrepImage runs a built agentry-ripgrep with the flags the runner's tools
-# server will pass (plan ripgrep-search.md §5): no network, every capability
-# dropped, no new privileges, a read-only root, the invoking uid, an empty
-# environment of its own (only Docker's), 512 MiB, over build/ripgrep/fixtures/tree read-only. (The
-# tools server's own holding, its uid and Landlock, is the CLI's to test.) It
-# fails unless rg reports source.env's version without PCRE2, a case-blind
-# search finds the three files that hold "invoice" (one a .gitignore names,
-# one hidden) as JSON match events and no other, a pattern past the size
-# limit is refused, --files lists every fixture file, the
-# binary is static, the licences are there, and a search under strace makes
-# no network system call. PLATFORM asks for, and checks, one architecture.
+# server will pass: no network, every capability dropped, no new privileges, a
+# read-only root, the invoking uid, an empty environment of its own (only
+# Docker's), 512 MiB, over build/ripgrep/fixtures/tree read-only. (The tools
+# server's own holding, its uid and Landlock, is the CLI's to test.) It fails
+# unless rg reports source.env's version without PCRE2, a case-blind search
+# finds the three files that hold "invoice" (one a .gitignore names, one hidden)
+# as JSON match events and no other, a pattern past the size limit is refused,
+# --files lists every fixture file, the binary is static, the licences are
+# there, and a search under strace makes no network system call. PLATFORM asks
+# for, and checks, one architecture.
 ripgrepImage() {
 	local ref="$1" bad=0 runtime="${CONTAINER:-docker}" out got want tag rc alpine
 	local helper="local/agentry-ripgrep-check:$$"
@@ -890,7 +878,7 @@ ripgrepImage() {
 		--security-opt label=disable --read-only --user "$(id -u):$(id -g)" --env-file /dev/null
 		--memory 512m ${PLATFORM:+--platform "$PLATFORM"}
 		-v "$PWD/$RIPGREP_CTX/fixtures/tree:/in:ro")
-	# Plan §5's fixed flags, every one: the two size limits bound what a
+	# The runner's fixed flags, every one: the two size limits bound what a
 	# model's pattern may compile to.
 	# --json is the search's; the listing (--files) takes the rest.
 	local flags=(--no-config --no-ignore --hidden --glob '!.git' --max-filesize 8M
@@ -1013,8 +1001,7 @@ CODEX_CTX=build/agentry-codex
 # version, its tag, a commit and a SHA-256 for each architecture's tarball and
 # for LICENSE and NOTICE; verify.sh pins OpenAI's release workflow and GitHub's
 # issuer; fetch.sh verifies the binary and runs the three negative controls; and the
-# Dockerfile runs fetch.sh (agentry-dockerimages#53). The greps match the
-# scripts' own text, `$` and all.
+# Dockerfile runs fetch.sh. The greps match the scripts' own text, `$` and all.
 # shellcheck disable=SC2016
 checkCodex() {
 	local bad=0 key val
@@ -1180,8 +1167,7 @@ hostlinkPackages() {
 
 # checkHostlink holds the host link image's context to its contract: the
 # OpenSSH client's three packages and nothing else (never the setuid
-# openssh-keysign, never a server), and a non-root user (plan runtime-hosts.md D5;
-# agentry-dockerimages#71).
+# openssh-keysign, never a server), and a non-root user.
 checkHostlink() {
 	local bad=0 p n=0
 	while IFS= read -r p; do
@@ -1518,10 +1504,9 @@ hostlinkImage() {
 
 BROWSER_CTX=build/agentry-browser
 
-# checkBrowser holds the browser image's context to its contract (plan
-# browser-testing.md §7, D5, D14; agentry-dockerimages#82): source.env pins
-# the server, the Playwright it brings, the Chrome for Testing revision and
-# version and a SHA-256 for each architecture's archive from Google's bucket;
+# checkBrowser holds the browser image's context to its contract: source.env
+# pins the server, the Playwright it brings, the Chrome for Testing revision
+# and version and a SHA-256 for each architecture's archive from Google's bucket;
 # package.json and package-lock.json pin that same server and Playwright,
 # with integrity hashes, and are installed with --ignore-scripts; fetch.sh
 # holds the archive to its SHA-256 and browsers.json to source.env; the
@@ -1628,7 +1613,7 @@ PY
 # browserImage runs a built agentry-browser hardened, as the runner runs its
 # browser server (no network, every capability dropped, no new privileges, a
 # read-only root, the image's own user, a tmpfs home and /tmp, an output
-# folder bound read-write; plan browser-testing.md §7, agentry-dockerimages#82).
+# folder bound read-write).
 # It fails unless the user is uid 10001 and the working directory
 # /out-browser, the record names source.env's server, Playwright and this
 # architecture's browser and SHA-256, the browser is at the path the image's

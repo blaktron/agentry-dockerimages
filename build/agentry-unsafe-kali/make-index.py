@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """The Unsafe Mode image's command index, and the check of its extras list.
 
-Plan unsafe-mode.md §4.1 (agentry-notes), D3 and D8; agentry-dockerimages#15.
-
 The index maps each command a Kali package puts in usr/bin, usr/sbin, bin or
 sbin to the package that ships it, from Kali's Contents-<arch> for main,
 contrib and non-free. A command several packages ship takes, in order:
@@ -11,11 +9,11 @@ contrib and non-free. A command several packages ship takes, in order:
   2. the one package Kali marks Priority required, important or standard.
 
 What is left ambiguous after that is left out of the index and written to
-ambiguous.tsv, never guessed. The CLI (agentry-cli, Unsafe Mode M2) reads the
-index by a declared command's bare name and installs the package it names, so
-both columns are held to a grammar (plan invariant 3): a command that is not a
-plain command name, and a package that is not a Debian package name, are left
-out and counted, whatever the Contents say.
+ambiguous.tsv, never guessed. The CLI (agentry-cli) reads the index by a
+declared command's bare name and installs the package it names, so both
+columns are held to a grammar: a command that is not a plain command name, and
+a package that is not a Debian package name, are left out and counted,
+whatever the Contents say.
 
 Every file read is first held to the SHA-256 that Kali's InRelease lists for
 it. apt-get update has already verified InRelease's signature against Kali's
@@ -26,7 +24,7 @@ the Contents are at hand: each row is one of the two closed recipe kinds,
 each value is held to a grammar, and a link's path must be a file its package
 ships on this architecture.
 
-The base's own programs (agentry-dockerimages#23). Contents does not list
+The base's own programs. Contents does not list
 alternatives links, so a program the built base already carries through one
 (awk, which, pager...) would have no row, and the CLI would call it
 unavailable while the run could start it; so would a program the base carries
@@ -342,7 +340,7 @@ def base_programs(root):
 
 
 def base_scan(root, datadir, unowned_path):
-    """Index the base's own programs that have no row (agentry-dockerimages#23)."""
+    """Index the base's own programs that have no row."""
     index_path = os.path.join(datadir, "commands.tsv")
     ambiguous_path = os.path.join(datadir, "ambiguous.tsv")
     indexed = read_rows(index_path)

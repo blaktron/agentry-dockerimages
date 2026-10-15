@@ -1,8 +1,6 @@
 # Build, check, sign and publish agentry-browser, the browser server image:
 # Microsoft's @playwright/mcp and the Chrome for Testing build of the
-# Playwright it pins, on our ubuntu:noble mirror (agentry-notes
-# plans/browser-testing.md §4, §7, D5; agentry-dockerimages#82), to
-# ghcr.io/blaktron.
+# Playwright it pins, on our ubuntu:noble mirror, to ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -65,7 +63,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -204,7 +202,7 @@ jobs:
           # shellcheck source=/dev/null
           . build/agentry-browser/source.env
           row=$(printf 'agentry-browser\tghcr.io/blaktron/agentry-browser:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the browser server image: @playwright/mcp $MCP_VERSION from its lockfile and Chrome for Testing $CHROMIUM_VERSION held to its SHA-256, with its Chrome policy (ECH and QUIC off), on our ubuntu:noble mirror, uid 10001, amd64 and arm64, signed keyless by the browser workflow (agentry-cli's browser server, plan browser-testing.md)")
+            "the browser server image: @playwright/mcp $MCP_VERSION from its lockfile and Chrome for Testing $CHROMIUM_VERSION held to its SHA-256, with its Chrome policy (ECH and QUIC off), on our ubuntu:noble mirror, uid 10001, amd64 and arm64, signed keyless by the browser workflow (agentry-cli's browser server)")
           {
             echo "### agentry-browser:$IMAGE_TAG"
             echo
