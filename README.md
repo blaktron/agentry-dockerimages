@@ -1,1042 +1,482 @@
 # agentry-dockerimages
 
-The container images the Agentry QuickAgent runtime runs, published to
+The container images the Agentry runner uses, published to
 `ghcr.io/blaktron`. Each image is either a mirror of an upstream image, copied
-unchanged and pinned by digest, or built here from a pinned upstream commit.
+unchanged and pinned by digest, or built here from pinned upstream source or
+from a build context in this repository. This repository holds the manifest of
+those images, the scripts that mirror, build and check them, and the
+workflows that publish and sign them.
+
+What each image does inside a run is documented with the runner:
+<https://docs.secureagentry.net/runner/>.
+
+## Layout
+
+| Path | What it holds |
+|---|---|
+| `images.tsv` | The manifest: one tab-separated row per image, `name`, upstream ref, digest, kind (`mirror` or `build`) and role. Every upstream ref is pinned by digest. A `build` row names our own published tag and that tag's manifest digest. |
+| `build/<name>/` | One build context per built image: a `Dockerfile`, `source.env` (what is built and from which pinned commit, release or tag), `bases.env` (the base images, which must have rows in `images.tsv`) and the files that build needs. |
+| `scripts/mirror.sh` | Copies the `mirror` rows into the registry by digest. |
+| `scripts/pin.sh` | Reports upstream tags whose digest has moved. |
+| `scripts/build.sh` | Builds a context in `build/`. |
+| `scripts/check.sh` | Checks the repository, and checks built images. |
+| `.github/workflows/` | `ci` (checks), `images` (mirror and simple builds), and one publishing workflow per image that is built per architecture and signed. |
+| `NOTICE`, `LICENSE` | Licences, see the end of this file. |
+
+The Agentry server's own images (Postgres, MinIO, Redis, the edge,
+authentik, OpenSearch, `secureagentryd`) are not here. Neither are the runner
+image and the per-release exec and MCP-server images: the CLI builds those
+locally on the machine that runs them.
 
 ## Images
 
-| Image | Upstream | Kind | Used for |
+Mirrors keep the upstream digest and every platform of the upstream manifest
+list. Built images are listed with what they are built from.
+
+| Image | Source | Kind | What it is for |
 |---|---|---|---|
-| `agentry-mcp-gateway:v0.43.3` | `docker/mcp-gateway:v0.43.3` | mirror | the MCP gateway, the run's tool plane |
-| `agentry-docker-agent:1.150.0` | `docker/docker-agent:1.150.0` | mirror | the default agent harness |
-| `agentry-golang-alpine:1.27-alpine` | `golang:1.27-alpine` | mirror | builds the runner image |
-| `agentry-alpine:3.22` | `alpine:3.22` | mirror | the runner image's runtime base |
-| `agentry-node-alpine:24-alpine` | `node:24-alpine` | mirror | installs and runs declared npm MCP servers (the CLI's default since agentry-cli#608) |
-| `agentry-node-alpine:22-alpine` | `node:22-alpine` | mirror | the same, for CLIs released before agentry-cli#608 and policies that pin it |
-| `agentry-python-alpine:3.12-alpine` | `python:3.12-alpine` | mirror | installs and runs declared PyPI MCP servers |
-| `agentry-docker-agent-src:1.128.0` | `github.com/docker/docker-agent` @ `v1.128.0` | build | the harness built from source (`build/docker-agent/`) |
-| `agentry-unsafe-kali:2026.09.30.3` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | the base of the desktop's Unsafe Mode exec images, amd64 and arm64 ([below](#the-unsafe-mode-image)) |
-| `agentry-files:2026.10.04.3` | `alpine:3.22` + `build/agentry-files/` | build | the decoders and the malware check (clamscan) of the runner's decode step, amd64 and arm64, signed ([below](#the-files-image)) |
-| `agentry-typst:2026.10.09.2` | `github.com/typst/typst` @ `v0.15.1`, patched, + the Noto fonts, the report designs' families and cmarker | build | the PDF renderer's files for `export_pdf`, files only, amd64 and arm64, signed ([below](#building-typst-from-source)) |
-| `agentry-codex:0.162.0-2026.10.09.1` | OpenAI's Codex CLI `rust-v0.162.0` release binary, verified against OpenAI's signature | build | the Codex harness image for a ChatGPT model sign-in, amd64 and arm64, signed ([below](#the-codex-image)) |
-| `agentry-hostlink:2026.10.11.1` | `alpine:3.22` + `build/agentry-hostlink/` | build | the OpenSSH client (`ssh`, `sftp`, `ssh-keyscan`, `ssh-keygen`) the runner's host link reaches a target host with, amd64 and arm64, signed ([below](#the-host-link-image)) |
-| `agentry-ripgrep:2026.10.13.2` | `github.com/BurntSushi/ripgrep` @ `15.2.0` | build | the search engine the runner's planned `grep` and `glob` tools will run, files only, amd64 and arm64, signed ([below](#the-ripgrep-image)) |
-| `agentry-browser:2026.10.13.1` | `ubuntu:noble` + `@playwright/mcp` 0.0.83 + Chrome for Testing 155.0.8059.12 + `build/agentry-browser/` | build | the browser server a QuickAgent that declares `capabilities.browser` gets, amd64 and arm64, signed ([below](#the-browser-image)) |
+| `agentry-mcp-gateway` | `docker/mcp-gateway` | mirror | The MCP gateway, started once per run: the run's tool plane. |
+| `agentry-docker-agent` | `docker/docker-agent` | mirror | The default harness: the agent program that talks to the model. |
+| `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
+| `agentry-alpine` | `alpine:3.22` | mirror | The runner image's runtime base, and the base of the files and host link images. |
+| `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
+| `agentry-python-alpine` | `python:3.12-alpine` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares. |
+| `agentry-unsafe-kali` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | The base of the desktop's Unsafe Mode exec images, amd64 and arm64. |
+| `agentry-files` | `alpine:3.22` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
+| `agentry-typst` | Typst, patched, plus the Noto fonts, the report designs' font families and the cmarker package (`build/typst/`) | build | The PDF renderer's files for `export_pdf`, files only, amd64 and arm64. |
+| `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.22` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
+| `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
+| `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
+| `agentry-browser` | `ubuntu:noble` + `@playwright/mcp` + Chrome for Testing (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | Docker Agent built from a pinned commit, published separately from the mirror so the two can be compared. |
 
-Three more mirrors are needed only to build `agentry-docker-agent-src`:
-`agentry-mcp-gateway-v2:v2` (`docker/mcp-gateway:v2`),
-`agentry-harness-alpine:3.23` (`alpine:3.23`) and
-`agentry-harness-golang:1.27.2-alpine3.23` (`golang:1.27.2-alpine3.23`).
-One more is needed only to build `agentry-unsafe-kali`:
-`agentry-kali-rolling:latest` (`kalilinux/kali-rolling`, pinned by digest).
-And one only to build `agentry-typst` and `agentry-ripgrep`:
-`agentry-rust-alpine:1.98.1-alpine3.22` (`rust:1.98.1-alpine3.22`).
-And one only to build `agentry-codex`: `agentry-cosign:v3.1.3`
-(`ghcr.io/sigstore/cosign/cosign:v3.1.3`), whose binary verifies OpenAI's
-signature on the Codex release in the build's fetch stage
-([below](#the-codex-image)).
-And two only to build `agentry-browser`: `agentry-ubuntu:noble`
-(`ubuntu:noble`, its base) and `agentry-node-bookworm:24-bookworm-slim`
-(`node:24-bookworm-slim`), which installs the server from its lockfile and
-gives the image its `node` ([below](#the-browser-image)).
+Mirrors used only as bases when building:
 
-`images.tsv` is the manifest: one tab-separated row per image, with our
-name, the upstream ref, the upstream digest, the kind and the role. A `build`
-row names our own published tag and its digest instead.
+| Image | Source | Used by |
+|---|---|---|
+| `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
+| `agentry-harness-alpine` | `alpine:3.23` | `build/docker-agent/`: runtime base. |
+| `agentry-harness-golang` | `golang:1.27.2-alpine3.23` | `build/docker-agent/`: compiler. |
+| `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
+| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
+| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
+| `agentry-ubuntu` | `ubuntu:noble` | `build/agentry-browser/`: base. |
+| `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. |
 
-The Agentry server's own images (Postgres, MinIO, Redis, the edge, authentik,
-OpenSearch, `secureagentryd`) are not here. Neither are the runner image and
-the per-release exec and MCP-server images: the CLI builds those locally on
-the machine that runs them.
+Packages that the publishing workflows create in this public repository are
+public, so the images a run pulls need no registry login. The build-time
+bases of `build/docker-agent/` and its output are not pulled by a run;
+building that context needs a `docker login ghcr.io` with read access.
 
-## Digests
-
-`scripts/mirror.sh` copies each manifest registry to registry with
-`docker buildx imagetools create`, so a mirrored image keeps the upstream
-digest and every platform in its manifest list. The script checks the
-destination digest after each copy and fails if it differs. Pin by digest:
+Each image is referenced by digest, for example:
 
 ```
 ghcr.io/blaktron/agentry-alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
 ```
 
-## Who pulls these
+The runner's operator policy can point these at another registry or pin them
+by digest; see the runner documentation.
 
-Since 2026-09-23 the Agentry CLI's built-in defaults name these images
-(agentry-cli#231, recorded as register entry DR-32), so an ordinary
-`agentry run` uses them with nothing to configure:
+## Prerequisites
 
-- The runner image is built on `agentry-golang-alpine` and `agentry-alpine`.
-- The gateway is pulled.
-- `agentry-docker-agent` is pulled when the default harness is used.
-- `agentry-node-alpine` or `agentry-python-alpine` is pulled when a QuickAgent
-  declares npm or PyPI MCP servers.
+- Docker with `buildx` (`docker buildx imagetools` copies manifests between
+  registries without pulling layers).
+- `bash`, `git`, `python3` with PyYAML, and `shellcheck`, for
+  `scripts/check.sh`.
+- For mirroring or pushing: `docker login ghcr.io` with a token that can write
+  packages in the namespace. The scripts read no credential themselves.
+  `REGISTRY` sets the destination (default `ghcr.io/blaktron`) and `MANIFEST`
+  the manifest file (default `images.tsv`).
+- Docker Hub allows only a limited number of anonymous pulls per IP, which a
+  full mirror run can exceed; `docker login` to Docker Hub first.
+- For the image checks: a container runtime. `--codex-image` also needs
+  `cosign`, `file` and network access to Sigstore.
+- Building a context from upstream source needs `git` and network access to
+  the upstream repository, and several GB of free disk.
 
-The desktop app and Agentry's hosted runs use the same defaults, but they
-move later:
+## Mirror, pin, build and check
 
-- The desktop embeds a pinned version of the CLI's code and moves when that
-  pin is bumped.
-- Hosted runs move when their installed CLI is updated.
+**Check the repository** (no registry, no credentials, nothing pulled):
 
-The defaults moved off Docker Hub for two reasons:
-
-- Docker Hub limits anonymous pulls, and a first run pulls at least four
-  images from whatever address the user is on.
-- The harness holds the model API key, and it arrived by a tag that only its
-  vendor controlled.
-
-The tags here are ours, and each was verified against the upstream digest
-when it was mirrored. They are still tags (see "Repointing the images").
-
-The CLI moved on 2026-09-23, once the six packages below were public.
-
-## Public and private packages
-
-Six packages are public, so pulling them needs no login. These are the ones a
-run pulls:
-
-- `agentry-mcp-gateway`
-- `agentry-docker-agent`
-- `agentry-golang-alpine`
-- `agentry-alpine`
-- `agentry-node-alpine`
-- `agentry-python-alpine`
-
-Four packages are private:
-
-- `agentry-mcp-gateway-v2`, `agentry-harness-alpine` and
-  `agentry-harness-golang`, the build-time bases of `build/docker-agent/`
-- `agentry-docker-agent-src`, that build's output, which nothing uses yet
-
-A run never pulls these four. Building `build/docker-agent/` needs a
-`docker login ghcr.io` with read access.
-
-Both groups were checked with an anonymous manifest fetch on 2026-09-24.
-
-The `unsafe-kali` workflow creates two more packages, and a package a
-workflow creates in this public repository is public:
-
-- `agentry-unsafe-kali`, which the desktop pulls when Unsafe Mode is turned
-  on, so it must need no login;
-- `agentry-kali-rolling`, its build-time base.
-
-The `typst` workflow likewise creates `agentry-typst`, which the runner image
-copies from and so must need no login, and its build-time base
-`agentry-rust-alpine`.
-
-The `ripgrep` workflow creates `agentry-ripgrep`, which the runner image
-copies from and so must need no login; its build-time base is
-`agentry-rust-alpine`, as Typst's is.
-
-The `codex` workflow creates `agentry-codex`, which the CLI pulls for a
-ChatGPT model sign-in and so must need no login, and its build-time base
-`agentry-cosign`.
-
-The `hostlink` workflow creates `agentry-hostlink`, which the CLI pulls for a
-run given a target host and so must need no login. It has no build-time base
-of its own: it is built on `agentry-alpine`.
-
-## Repointing the images
-
-Of the five images below, the CLI's defaults pin two by digest: the harness,
-whose digest each run's receipt names (agentry-cli#738; 1.150.0 since
-agentry-cli#836), and the Go builder. The gateway and the two MCP runtimes
-are tags. An operator who wants their own registry, or digest pins, sets them
-in the runner's operator policy
-(`~/.agentry/runner/policy.yaml`):
-
-```yaml
-images:
-  gateway: ghcr.io/blaktron/agentry-mcp-gateway:v0.43.3
-  harnessDockerAgent: ghcr.io/blaktron/agentry-docker-agent:1.150.0
-  goBuilder: ghcr.io/blaktron/agentry-golang-alpine:1.27-alpine
-  nodeRuntime: ghcr.io/blaktron/agentry-node-alpine:24-alpine
-  pythonRuntime: ghcr.io/blaktron/agentry-python-alpine:3.12-alpine
+```
+scripts/check.sh               # manifest, scripts, workflows, build contexts
+scripts/check.sh --self-test   # break each rule in a copy and expect a failure
 ```
 
-To pin by digest, append `@sha256:…` from `images.tsv` to each ref.
+The header of `scripts/check.sh` lists every rule. The `ci` workflow runs both
+commands on each pull request and on each push to `dev` and `main`.
 
-The runner image's two bases are set differently. `goBuilder` becomes the
-`GO_IMAGE` build argument of the CLI's `runnerimage/Dockerfile`.
-`agentry-alpine` is that Dockerfile's `RUNTIME_IMAGE` argument, and it has no
-policy field. The CLI passes only `GO_IMAGE` when it builds, so the runtime
-base is the default built into the CLI and cannot be changed from
-`policy.yaml`.
+**Report moved upstream tags:**
 
-## Scripts
+```
+scripts/pin.sh
+```
 
-| Script | What it does |
-|---|---|
-| `scripts/pin.sh` | Resolves every upstream ref and reports the tags whose digest has moved or that no longer resolve. It does not edit `images.tsv`. |
-| `scripts/mirror.sh [name …]` | Copies the `mirror` rows to `$REGISTRY` by digest and verifies each destination digest. |
-| `scripts/check.sh` | Checks the manifest, the scripts, the workflows, the build contexts' base refs, the Unsafe Mode image's index generator and extras list, the files image's fixture list the host link image's package list and the ripgrep image's pins, with no registry and no credentials; the header lists the rules. `--self-test` breaks each rule in a copy and expects a failure. `--unsafe-image <ref>` runs a built `agentry-unsafe-kali`, asserts that every fixture command resolves, and fails when a program on the image's own PATH has no row (`CONTAINER` picks the runtime, `PLATFORM` the architecture). `--files-image <ref>` decodes every fixture inside a built `agentry-files` with no network, and runs its clamscan against a one-signature database ([below](#the-files-image)). `--clamav-db <dir> <files-ref>` checks a real signature database with the files image ([below](#the-clamav-signature-bundle)). `--typst-image <ref>` renders the fixture report inside a built `agentry-typst` with no network, and holds an `@preview` import to failing with no network call ([below](#building-typst-from-source)). `--codex-image <ref>` runs a built `agentry-codex` hardened with no network and verifies the binary in it against OpenAI's signature ([below](#the-codex-image)). `--hostlink-image <ref>` runs a built `agentry-hostlink` hardened against a throwaway OpenSSH server on an internal network ([below](#the-host-link-image)). `--ripgrep-image <ref>` runs a built `agentry-ripgrep` with the flags the runner will pass, hardened and with no network, over a fixture tree, and traces it ([below](#the-ripgrep-image)). |
-| `scripts/build.sh <name>` | Builds `build/<name>/` from its pinned upstream commit, or from the context itself, with every base taken from our mirrors by tag and digest. `PUSH=1` pushes the result. A context with `PLATFORMS` is built one architecture at a time (`PLATFORM=…`, tagged `<tag>-<arch>`), and `--merge` joins them into `<tag>`; with `PART_DIGESTS` (`amd64=sha256:… arm64=sha256:…`) it joins those digests instead of the tags, refuses a tag that exists, and holds the joined index to listing exactly them. |
+It resolves every ref in `images.tsv` and prints `ok` or `MOVED` with the
+pinned and current digest. It never edits the manifest. A moved tag changes
+nothing that is published, because mirroring copies by digest.
 
-`REGISTRY` sets the destination (default `ghcr.io/blaktron`). The scripts read
-no credentials: run `docker login ghcr.io` first, and `docker login` for
-Docker Hub. Docker Hub allows 100 anonymous pulls per IP, and its sources
-disagree about the window. The registry's response header says one hour
-(`ratelimit-limit: 100;w=3600`), while Docker's documentation says six
-hours. Both were checked on 2026-09-24. A full mirror run can exceed either.
+**Mirror:**
 
-The `ci` workflow runs `scripts/check.sh` and its self-test on every pull
-request and every push to `dev` and `main`, on a GitHub-hosted runner. It
-pulls no image and needs no credentials.
+```
+scripts/mirror.sh              # every mirror row
+scripts/mirror.sh <name> ...   # only these names
+```
 
-The `images` workflow runs the same steps, then mirrors every `mirror` row
-and builds every context in `build/` except those built per architecture,
-which have their own workflows (`unsafe-kali`, `files`, `typst`, `codex`, `hostlink`, `ripgrep`). It is started by hand, and it
-logs in to Docker Hub when the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
-secrets are set.
+Each `mirror` row is copied with `docker buildx imagetools create` to
+`$REGISTRY/<name>:<tag>`, and the destination digest is read back and must
+equal the pinned digest.
 
-## The Unsafe Mode image
+**Build:**
 
-`agentry-unsafe-kali` is the base the desktop's Unsafe Mode builds a
-QuickAgent's exec image on, when that QuickAgent declares commands the
-machine's exec catalogue does not carry (agentry-notes `plans/unsafe-mode.md`;
-agentry-dockerimages#15). The desktop pulls it when a person turns Unsafe
-Mode on; the CLI (Unsafe Mode M2) reads its two data files and installs each
-declared command on top of it, one package at a time.
+```
+scripts/build.sh <name>                  # build build/<name>/, do not push
+PUSH=1 scripts/build.sh <name>           # build and push to $REGISTRY
+```
 
-It is a lean Kali Linux (`kali-rolling`): `ca-certificates`, `python3` and
-`python3-venv`, and no security tool. Under `/etc/agentry/unsafe/`:
+`scripts/build.sh` refuses to build when a base named in `bases.env` has no
+row in `images.tsv`: each base is passed to the build as our mirror's tag and
+pinned digest together. A context's `source.env` sets `IMAGE_NAME` and
+`IMAGE_TAG`, and for a build from upstream source `UPSTREAM_REPO`,
+`UPSTREAM_COMMIT` and `UPSTREAM_TAG`: the script clones that commit and passes
+the context directory to the build as the named build context `agentry`
+(patches and fetch lists reach the Dockerfile that way). `IMAGE_TAG` from the
+environment overrides `source.env`.
 
-- **`commands.tsv`, the command index.** Each command a Kali package puts in
-  `usr/bin`, `usr/sbin`, `bin` or `sbin` (main, contrib and non-free), mapped
-  to its package. It is generated at build time by
-  `build/agentry-unsafe-kali/make-index.py` from Kali's `Contents-<arch>` and
-  `Packages` for the image's own architecture. Each file is first held to the
-  SHA-256 in Kali's `InRelease`, whose signature `apt-get update` has checked.
-  A command several packages ship takes the package named like the command,
-  then the one package of priority standard or higher. Then, in the finished
-  image, the programs it already carries that Contents does not list
-  (alternatives links such as `awk`, `which` and `pager`) or left ambiguous
-  (`python3.14`) get a row naming the package that owns the file each resolves
-  to, from dpkg's own lists (agentry-dockerimages#23). A program on the PATH
-  that no package owns fails the build unless
-  `build/agentry-unsafe-kali/base-unowned.txt` names it with a reason; only
-  `policy-rc.d`, the Debian container image's service hook, is there.
-- **`ambiguous.tsv`.** The commands that rule leaves undecided. They are left
-  out of the index, never guessed.
-- **`extras.tsv`, the extras list.** It is maintained by hand for commands no
-  package puts on `PATH`, and is a closed set of two recipes: `pip <command>
-  <name>==<version>` and `link <command> <package> <path>`. The build refuses
-  any other shape, and a link path its package does not ship.
+A context with `PLATFORMS` in `source.env` is built one architecture at a
+time, each natively:
 
-`build/agentry-unsafe-kali/fixture-commands.txt` holds the declared commands
-of `blaktron/binary-reverse-engineer@0.1.0`, the QuickAgent that prompted
-Unsafe Mode. `scripts/check.sh --unsafe-image` asserts that each resolves
-through the extras list or the index. On 2026-09-30 all 16 resolved on both
-architectures:
+```
+PLATFORM=linux/arm64 IMAGE_TAG=<tag> PUSH=1 scripts/build.sh <name>   # pushes <tag>-arm64
+IMAGE_TAG=<tag> scripts/build.sh --merge <name>                       # joins <tag>-<arch> into <tag>
+PART_DIGESTS='amd64=sha256:... arm64=sha256:...' IMAGE_TAG=<tag> scripts/build.sh --merge <name>
+```
 
-- 13 through the index;
-- `analyzeHeadless` through a link from `ghidra`;
-- `decompyle3` and `uncompyle6` through pip.
+With `PART_DIGESTS`, `--merge` joins exactly those digests instead of the
+tags, refuses an `IMAGE_TAG` that already exists, and checks that the joined
+index lists exactly the given images.
 
-The index held 47,098 commands on amd64 and 46,071 on arm64.
+**Check a built image.** Each built image has a check that runs it the way the
+runner does (no network, every capability dropped, read-only root where the
+runner uses one) and asserts what it holds:
 
-**Publishing.** The `unsafe-kali` workflow (manual dispatch) mirrors the base,
-builds each architecture natively (amd64 on `ubuntu-latest`, arm64 on
-`ubuntu-24.04-arm`), runs the fixture check on each before pushing it, joins
-them into one tag named for the UTC build date and the run number
-(`2026.09.30.1`), and checks the joined image. It runs only from `main`, and
-refuses a tag that already exists. The `agentry-unsafe-kali` row in
-`images.tsv` then takes that tag and its digest. The package is public, so
-the desktop pulls it without a login. The first published build was
-`2026.09.30.2` (run 36710671499). The one pinned now is
-`ghcr.io/blaktron/agentry-unsafe-kali:2026.09.30.3@sha256:7c3da264fd0e8420f0367fa179e6b89110fa2f86bef8850f48d5f89ae21ab869`
-(run 36776537608), the first whose index also holds the base's own
-programs (agentry-dockerimages#23). Its base is `kali-rolling` at the pinned
-digest, with Kali's index of 2026-09-30 18:05 UTC. An anonymous manifest
-fetch answered 200 the same day. On the first of each month the
-workflow also runs by itself, only to report whether the Kali base has moved
-since it was pinned: a red run is the reminder to re-pin.
+```
+scripts/check.sh --unsafe-image <ref>     # CONTAINER=<runtime> PLATFORM=<os/arch> pick runtime and architecture
+scripts/check.sh --files-image <ref>
+scripts/check.sh --clamav-db <dir> <files-ref>
+scripts/check.sh --typst-image <ref>
+scripts/check.sh --codex-image <ref>
+scripts/check.sh --hostlink-image <ref>
+scripts/check.sh --ripgrep-image <ref>
+scripts/check.sh --browser-image <ref>
+```
 
-**The monthly re-pin (D10).** Kali has no release tags and no snapshot
-service, so the base is re-pinned monthly, and on demand:
+`PLATFORM` (for example `linux/arm64`) asks for, and checks, one
+architecture.
 
-1. `scripts/pin.sh` reports that `kalilinux/kali-rolling` has moved.
-2. A pull request puts the new digest in the `agentry-kali-rolling` row.
-3. The `unsafe-kali` workflow is dispatched.
-4. A second pull request records the new image's digest in the
-   `agentry-unsafe-kali` row.
-5. The CLI's default follows with its own pin change.
+## Adding an image or moving a pin
 
-Package versions are not frozen. Each build records what it installed, and
-the CLI records what each exec image installed in the run's receipt.
+**Move a mirror's pin.** Run `scripts/pin.sh`, review what changed upstream,
+edit the digest in `images.tsv` by hand, run `scripts/check.sh`, then run
+`scripts/mirror.sh <name>`. The `images` workflow does the same from
+`workflow_dispatch`; its `names` input restricts it to the named rows and
+builds nothing.
 
-**arm64 by hand.** The workstation has no arm64 emulation. arm64 is tested on
-the Mac build host (`maxbookpro`, Apple silicon) with Apple's `container` CLI
-(1.5.0, installed 2026-09-30):
+**Add a mirror.** Add a row with kind `mirror`: our name, the upstream ref,
+its digest (`docker buildx imagetools inspect <ref> --format
+'{{.Manifest.Digest}}'`), and a role. Run `scripts/check.sh`, then
+`scripts/mirror.sh <name>`.
+
+**Add a built image.**
+
+1. Create `build/<name>/` with a `Dockerfile`, `source.env` and `bases.env`.
+2. Give every base in `bases.env` a `mirror` row in `images.tsv` and mirror it.
+3. Add a `build` row for the image once it is published; its digest is the
+   manifest digest of the published tag.
+4. Add a check to `scripts/check.sh` for the image's contents, and a workflow
+   for a per-architecture, signed image (copy the closest existing one).
+5. Add the licences to `NOTICE`.
+
+A published tag is never overwritten: a rebuild is a new tag and a new digest.
+
+## Publishing and signing
+
+The `images` workflow (manual dispatch) runs the repository check, reports
+moved tags, mirrors every `mirror` row (or the named ones) and builds every
+context that has no `PLATFORMS`.
+
+Each built image that has `PLATFORMS` has a workflow of its own: `unsafe-kali`,
+`files`, `typst`, `codex`, `hostlink`, `ripgrep` and `browser`. They are
+dispatched by hand and refuse to run from any branch but `main`. Each:
+
+- mirrors its build-time base by digest, so the package exists and is public
+  before a build pulls it;
+- builds amd64 on `ubuntu-latest` and arm64 on `ubuntu-24.04-arm`, natively,
+  and runs the image's check on each before pushing it;
+- joins the architectures into one tag named for the UTC date and the run
+  number, refusing a tag that exists, and checks the joined image;
+- writes the `images.tsv` row to the run's summary. A person then puts the row
+  in `images.tsv`.
+
+All of them except `unsafe-kali` also hand the merge the digest each push
+produced (never a tag), hold the joined index to listing exactly those images,
+sign the joined digest with cosign, keyless, as the workflow itself
+(`id-token: write` is granted to that job alone), verify the signature, and
+print the verify command in the run's summary.
+
+Verify a published digest, with the workflow named for the image (`files`,
+`typst`, `codex`, `hostlink`, `ripgrep` or `browser`):
+
+```
+cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
+  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/<workflow>.yaml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The `clamav-db` workflow publishes the ClamAV signature bundle
+`ghcr.io/blaktron/agentry-clamav-db` daily (07:17 UTC) and on dispatch. It
+has no row in `images.tsv`, because a pin would hold every machine to one
+day's signatures; its trust is the signature. Verify it the same way, with
+`clamav-db.yaml` as the workflow.
+
+## Per-image build notes
+
+The header of `scripts/check.sh` lists what each image check asserts.
+
+### agentry-unsafe-kali
+
+A lean Kali Linux (`kali-rolling`) with `ca-certificates`, `python3` and
+`python3-venv`, and no security tool. Under `/etc/agentry/unsafe/` it holds
+`commands.tsv`, an index of each command a Kali package ships in `usr/bin`,
+`usr/sbin`, `bin` or `sbin`, mapped to its package; `ambiguous.tsv`, the
+commands the index rules leave undecided (never guessed); and `extras.tsv`,
+maintained by hand, a closed set of two recipes (`pip <command>
+<name>==<version>` and `link <command> <package> <path>`) for commands no
+package puts on `PATH`. `build/agentry-unsafe-kali/make-index.py` generates
+the index at build time from Kali's `Contents-<arch>` and `Packages`, each file
+held to the SHA-256 in `InRelease`. A program on the `PATH` that no package
+owns fails the build unless `base-unowned.txt` names it with a reason.
+`fixture-commands.txt` lists commands that must resolve; `--unsafe-image`
+asserts it.
+
+Kali has no release tags and no snapshot service, so the base is re-pinned by
+hand. The monthly scheduled `unsafe-kali` run only reports whether the base has
+moved (a red run is the reminder) and builds nothing. To re-pin: `scripts/pin.sh`
+reports the move; put the new digest in the `agentry-kali-rolling` row;
+dispatch the `unsafe-kali` workflow; record the new image's digest in the
+`agentry-unsafe-kali` row.
+
+arm64 can be tested without emulation on an Apple-silicon machine with Apple's
+`container` CLI:
 
 ```
 container build --build-arg KALI_IMAGE=<the base by digest> -t local/agentry-unsafe-kali:arm64 build/agentry-unsafe-kali
 CONTAINER=container PLATFORM=linux/arm64 scripts/check.sh --unsafe-image local/agentry-unsafe-kali:arm64
 ```
 
-## The files image
+Unsafe Mode is described at <https://docs.secureagentry.net/agentry/unsafe-mode/>.
 
-`agentry-files` holds the decoders the runner's decode step runs over a run's
-documents before any agent starts (agentry-notes `plans/file-handling.md` §4,
-D3, D4; agentry-dockerimages#28):
+### agentry-files
 
-| Package | Decodes | Decoder |
-|---|---|---|
-| `pandoc-cli` | `.docx`, `.odt`, `.epub`, `.rtf` | `pandoc --sandbox` |
-| `poppler-utils` | `.pdf` | `pdftotext` |
-| `tesseract-ocr`, `tesseract-ocr-data-eng` | images, English OCR | `tesseract` |
-| Apache Tika 3.3.2, `openjdk17-jre-headless` | the long tail, detection by content | `tika-app --detect`, `--text`, `--xml` |
-| `libarchive-tools` | ZIP, TAR, 7z, RAR and other archives | `bsdtar` |
-| `file` (libmagic) | fast content detection | `file --mime-type` |
-| `clamav-scanner`, `clamav-libunrar` | the malware check of every input and archive member | `clamscan` |
+`alpine:3.22` with `pandoc-cli`, `poppler-utils`, `tesseract-ocr` with English
+data, Apache Tika (with `openjdk17-jre-headless`), `libarchive-tools`, `file`
+(libmagic) and `clamav-scanner` with `clamav-libunrar`, and their dependencies.
+There is no setuid or setgid file. `/etc/agentry/files/packages` lists the
+resolved versions. Tika's jar is pinned to Apache's SHA-512 and its wrapper
+bounds the heap to 512 MiB. The image holds no runner binary and no signature
+database; `clamscan` runs with no daemon, and `freshclam` is installed only
+because Alpine's package depends on it. `build/agentry-files/fixtures/` holds
+the documents and images the check decodes, and `expect.tsv` the phrase each
+must yield.
 
-It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
-those packages and their dependencies (libraries and data; no setuid or
-setgid file, which the check below asserts) and nothing else. `/etc/agentry/files/packages` lists
-the versions apk resolved and Tika's version, one `name-version` a line,
-for the receipt. Tika's runnable jar is pinned to Apache's SHA-512 and its
-wrapper bounds the heap to 512 MiB. Its upstream licence and notices stay
-in the jar. The M3 amd64 local image is 262,592,296 bytes in this workstation's Docker size report. The native
-publication reports 640,905,538 bytes for amd64 and 662,635,623 for arm64.
+The decode step and the malware checks are described at
+<https://docs.secureagentry.net/runner/#running-with-files> and
+<https://docs.secureagentry.net/runner/#the-malware-checks>.
 
-**Why it exists.** Until it, the CLI built this image at run time with
-`apk add` from Alpine's CDN, inside the run. On 2026-10-02 that fetch failed in
-a production Voice Writer run, which ended with no reason given (plan §1.1).
-Here the fetch happens once, in CI, retried, and the CLI pulls the result by
-digest. It holds no runner binary: the CLI adds its own in an offline layer
-`FROM` the pinned digest and minimizes the result to the decoders and the
-runner (agentry-cli#559). The decode container still runs with no network,
-every capability dropped and a read-only root (DR-39).
-
-**The fixture check.** `scripts/check.sh --files-image <ref>` decodes each
-file in `build/agentry-files/fixtures/` (eight documents and images from the
-CLI's Knowledge Creator corpus) the way the CLI's decode container runs a
-decoder: the decode role's argv with absolute paths, the invoking uid, no
-network, every capability dropped, a read-only root, a 512 MiB `/tmp` and the
-role's environment. It asserts the phrase `expect.tsv` names for each, and
-fails on any setuid or setgid file in the image. Tika detects the DOCX's
-content type and extracts its phrase as text and XHTML. Real ZIP, TAR, 7z
-and RAR fixtures are listed by bsdtar under the same containment. clamscan
-runs with the decode role's argv against a one-line signature database the
-check makes (the EICAR test file's MD5, ClamAV's `.hdb` format), and must
-find the EICAR file and a zip of it and pass every fixture.
-
-**Publishing and signing.** The `files` workflow (manual dispatch, from
-`main` only):
-- builds each architecture natively (amd64 on `ubuntu-latest`, arm64 on
-  `ubuntu-24.04-arm`) and runs the fixture check on each before pushing it;
-- hands the merge the digest each push produced, never a tag, and joins
-  those digests into one tag named for the UTC build date and the run
-  number, refusing a tag that already exists;
-- holds the joined index to listing exactly those images, checks it by its
-  digest, and signs that same digest with cosign, keyless, as the workflow
-  itself, then verifies the signature before reporting the `images.tsv` row.
-  A tag can be re-pointed by anything with write access to the package; a
-  digest cannot, so what is signed is what was checked.
-
-Verify a published digest with:
-
-```
-cosign verify ghcr.io/blaktron/agentry-files@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/files.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-The first build is `ghcr.io/blaktron/agentry-files:2026.10.02.1@sha256:0d35fb3a5239f4571ba0d36d6619250d030bef119ee40e8f765dc3b38428b140`
-(run 36997044715, 2026-10-02): both architectures decoded all eight fixtures
-before their push and the joined digest again before it was signed; the
-signature verified from the workstation the same day, and an anonymous
-manifest fetch answered 200. Its packages: `pandoc-cli-3.6.4-r0`,
-`poppler-utils-25.04.0-r0`, `tesseract-ocr-5.5.0-r2`,
-`tesseract-ocr-data-eng-5.5.0-r2`.
-
-M3's build is `agentry-files:2026.10.03.2@sha256:ee6b4f66fa2f30444cf9ffbac4acb83e4829baa6915963bdc322d547463d5ddd`
-(run 37152810514, 2026-10-03). Both native architectures passed all fixture
-checks, and the joined digest passed again before keyless signing and
-verification. Tika is 3.3.2, Java 17.0.19, libarchive 3.8.3, libmagic 5.46.
-
-M5's build is `agentry-files:2026.10.04.3@sha256:f8da034b365cd86c1498b041e87ee06faeb4264dfc6e25bd9c0d3013cf58a306`
-(run 37244194037, 2026-10-04): amd64 `97a407f5…` and arm64 `90cc605e…`. Each
-architecture, then the joined digest, passed every check, clamscan 1.4.3
-included (the EICAR file and its zip found, the eight fixtures clean). The
-signature verified from the workstation and an anonymous manifest fetch
-answered 200. The native images report 705,495,677 bytes (amd64) and
-710,570,308 (arm64).
-
-The `agentry-files` row in `images.tsv` then takes the tag and its digest, and
-the CLI pins that digest; agentry-cli's CI runs the `cosign verify` above on
-the pinned digest, and the sandbox hosts run it when they pre-pull the image
-(the CLI itself pulls by digest only). A rebuild is a new tag and a new digest, never an
-overwrite. M3 adds Apache Tika and libarchive (agentry-dockerimages#29). M5 adds
-ClamAV (agentry-dockerimages#30): `clamscan`, with no daemon and no signature
-database ([below](#the-clamav-signature-bundle)). Alpine's `clamav-scanner`
-depends on `freshclam`, so it is installed too, but nothing runs it: the decode
-container has no network, and the CLI's decode image is minimized to its
-catalogue's commands, which removes it.
-
-## The ClamAV signature bundle
+### The ClamAV signature bundle
 
 The decode container has no network, so clamscan's signatures come from
-outside: `ghcr.io/blaktron/agentry-clamav-db`, which the `clamav-db` workflow
-publishes every day (agentry-notes `plans/file-handling.md` §7, D15;
-agentry-dockerimages#30). The CLI refreshes its copy when it is over 24 hours
-old, verifies the signature below, and mounts the databases read-only into
-the decode container (agentry-cli#563). Past 7 days without a newer bundle,
-runs go on and the receipt says the signatures are stale.
+`ghcr.io/blaktron/agentry-clamav-db`. The `clamav-db` workflow runs
+`freshclam` from the `alpine:3.22` mirror into an empty directory, keeps
+exactly `main.cvd`, `daily.cvd` and `bytecode.cvd` (Cisco Talos's signed
+CVDs, which clamscan checks again as it loads them), checks them with the
+pinned files image and no network (`scripts/check.sh --clamav-db`), and pushes
+them as one OCI artifact (artifact type
+`application/vnd.blaktron.agentry.clamav-db.v1`, one layer per file, media type
+`application/vnd.clamav.cvd`) tagged with the UTC date and run number. It signs
+the pushed digest, verifies it, and only then moves `latest`, so `latest` never
+names an unsigned bundle. Each CVD carries its licence, the GNU GPL version 2,
+as `COPYING` inside it, and the bundle passes each CVD on unmodified.
 
-The workflow (daily at 07:17 UTC, or dispatched by hand, from `main` only):
-- runs `freshclam` from our mirror of `alpine:3.22` (the files image's own
-  base and ClamAV version) into an empty directory, and keeps exactly
-  `main.cvd`, `daily.cvd` and `bytecode.cvd`, Cisco Talos's signed CVDs,
-  which clamscan checks again as it loads them;
-- checks them with the files image `images.tsv` pins, with no network
-  (`scripts/check.sh --clamav-db`): the EICAR file and its zip found, every
-  fixture clean;
-- pushes the three files as one OCI artifact (artifact type
-  `application/vnd.blaktron.agentry.clamav-db.v1`, one layer a file, media
-  type `application/vnd.clamav.cvd`, named by `org.opencontainers.image.title`),
-  tagged with the UTC date and run number and refusing a tag that exists, so
-  a client downloads only the layers that changed (`main.cvd`, about 89 MB,
-  changes a few times a year; `daily.cvd`, about 23 MB, every day);
-- signs the pushed digest with cosign, keyless, as the workflow itself,
-  verifies it, and only then moves `latest` to it, so `latest` never names an
-  unsigned bundle; then fetches `latest` with no credential, as the CLI does.
+### agentry-codex
 
-The bundle has no row in `images.tsv`: it is not pinned, by design, since a
-pin would hold every machine to one day's signatures. Its trust is the
-signature. Verify one with:
+Nothing is compiled. `build/agentry-codex/` puts OpenAI's release binary
+(`codex-<arch>-unknown-linux-musl` from the GitHub release `CODEX_TAG` in
+`source.env`), unmodified, on the `alpine:3.22` mirror, running as uid 10001.
+The fetch stage (`fetch.sh`) holds the tarball to its SHA-256; verifies the
+binary against OpenAI's `.sigstore` bundle with `verify.sh` (signer: OpenAI's
+`rust-release.yml` at `refs/tags/<CODEX_TAG>`, run at `CODEX_COMMIT`); proves
+on every build that the verifier refuses a changed byte, another tag's identity
+and another commit; and fetches `LICENSE` and `NOTICE`, each held to its
+SHA-256. The cosign that verifies is Sigstore's own image (`agentry-cosign`),
+whose signature the `codex` workflow checks before it mirrors it. The binary
+is `/usr/local/bin/codex`; `/etc/agentry/codex/` holds the release record and
+the bundle, so it can be verified again. `CODEX_HOME` is `/home/codex`, a tmpfs
+over the runner's read-only root.
 
-```
-cosign verify ghcr.io/blaktron/agentry-clamav-db@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/clamav-db.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
+To bump Codex: set `CODEX_VERSION`, `CODEX_TAG`, `CODEX_COMMIT`,
+`CODEX_SHA256_AMD64`, `CODEX_SHA256_ARM64` (and the licence hashes if they
+changed) in `source.env`, update the release line in `NOTICE`, run
+`--codex-image` on a local build, and dispatch the `codex` workflow from `main`.
+Harness adapters are described at
+<https://docs.secureagentry.net/runner/#harness-adapters> and model sign-ins
+at <https://docs.secureagentry.net/runner/#model-sign-ins>.
 
-The signature databases are Cisco Talos's. Each CVD carries its licence, the
-GNU GPL version 2, as `COPYING` inside it, and the bundle passes each CVD on
-unmodified.
+### agentry-hostlink
 
-## The Codex image
+`alpine:3.22` with `openssh-client-default` (`ssh`), `openssh-client-common`
+(`sftp`, `ssh-keyscan`, and `scp`, `ssh-add`, `ssh-agent` from the same
+package) and `openssh-keygen`, and their dependencies. `openssh-keysign`, the
+client's one setuid program, is not installed, and there is no setuid or
+setgid file. `/etc/agentry/hostlink/packages` lists the resolved versions. A
+password reaches `ssh` through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force`,
+so no `sshpass` is installed. The image holds no runner binary and no agent
+socket or configuration, and forwards nothing.
 
-`agentry-codex` is the Codex harness image: OpenAI's Codex CLI, which the CLI's
-`codex` container adapter runs for a ChatGPT model sign-in, and on an OpenAI
-key when a policy picks it (agentry-notes `plans/model-sign-ins.md` §4.3, D5,
-D11; agentry-dockerimages#53; the adapter is agentry-cli#739). Model sign-ins
-are local runs only, so hosted runs never pull it.
+It runs as uid 10001 (`hostlink`). `ssh` will not start for a uid with no
+passwd entry, so running it as another uid needs a passwd line for that uid
+bound in; and `ssh` accepts a private key of mode 0600 only when the uid
+running it owns the file. The check runs against a throwaway OpenSSH server
+(the `alpine:3.22` mirror with `openssh-server`, built by the check) on an
+internal Docker network with no route out.
 
-Nothing is compiled. `build/agentry-codex/` takes OpenAI's release binary,
-`codex-<arch>-unknown-linux-musl` from the GitHub release `CODEX_TAG`
-(`source.env`), and puts it, unmodified, on our mirror of `alpine:3.22`. Alpine
-rather than `scratch` because the model sign-in's token reaches Codex through
-a command that reads a file (`cat`; plan D9).
+Target hosts are described at
+<https://docs.secureagentry.net/runner/#target-hosts-a-server-named-at-run-time>.
 
-**What the build holds the binary to.** The fetch stage (`fetch.sh`):
+### agentry-browser
 
-1. holds the release tarball to its SHA-256 in `source.env`, and to holding
-   the one binary;
-2. verifies the binary (OpenAI signs the binary, not the tarball) against its
-   `.sigstore` bundle with `verify.sh`: the signer must be
-   `https://github.com/openai/codex/.github/workflows/rust-release.yml@refs/tags/<CODEX_TAG>`,
-   as `https://token.actions.githubusercontent.com` certifies it, run by a
-   push in `openai/codex` at `CODEX_COMMIT`, with the signature in Rekor;
-3. proves, on every build, that the same verifier refuses a copy of the
-   binary with one byte changed, the genuine binary under another tag's
-   identity, and the genuine binary at another commit, each for that reason
-   (cosign's own message), so a refusal for another reason, such as Sigstore
-   not answering, does not count;
-4. fetches `LICENSE` and `NOTICE` at `CODEX_COMMIT`, each held to its SHA-256.
+Microsoft's [`@playwright/mcp`](https://github.com/microsoft/playwright-mcp)
+driving a headless Chrome for Testing, on the `ubuntu:noble` mirror. The runner
+starts it as a server in the run's gateway and passes the settings that hold a
+run (proxy, tool filter, Chromium sandbox, output folder, secrets file).
 
-Any failure stops the build. The cosign that verifies is Sigstore's own
-image, pinned by digest (`agentry-cosign`, build-time only); the `codex`
-workflow checks Sigstore's signature on that digest before it mirrors it.
-Only its binary is copied, and only into the fetch stage.
+- `@playwright/mcp` is installed in `/app` with `npm ci --ignore-scripts
+  --omit=dev` on the `node:24-bookworm-slim` mirror, held by
+  `package-lock.json` (exact versions, sha512 integrity). That mirror also
+  supplies `/usr/local/bin/node`.
+- Chrome for Testing in `/ms-playwright` comes from Google's bucket, held to a
+  SHA-256 per architecture in `source.env`; `fetch.sh` refuses unless the
+  lockfile's `playwright-core` names the same revision and version in its
+  `browsers.json`. Each SHA-256 was taken from a download that matched the MD5
+  Google stores for the object (its `x-goog-hash` header). The image holds the
+  full Chrome build only, because the headless shell ignores enterprise
+  policies.
+- `policy.json` is installed as Chrome's managed policy. It sets
+  `EncryptedClientHelloEnabled: false` (no launch flag can; Chromium otherwise
+  sends a GREASE ECH extension, which the run's browse proxy refuses) and turns
+  off QUIC, DNS-over-HTTPS, WebRTC UDP outside the proxy, component updates and
+  Google's background services.
 
-**The image.**
+It runs as uid 10001 (`browser`) in `/out-browser`, where the runner binds the
+run's `reports/browser/`, with no setuid or setgid file. System library
+versions are recorded in `/etc/agentry/browser/packages`, the server and browser
+versions in `/etc/agentry/browser/record`, licences in
+`/usr/share/licenses/agentry-browser`.
 
-| Path | What |
-|---|---|
-| `/usr/local/bin/codex` | the binary, static (musl); the entrypoint |
-| `/etc/agentry/codex/release` | the version, tag, commit, asset and binary SHA-256 and the signer |
-| `/etc/agentry/codex/codex.sigstore` | OpenAI's bundle, so the binary in the image can be verified again |
-| `/usr/share/licenses/codex/` | Codex's `LICENSE` and `NOTICE` |
+To bump: set the new version in `package.json`, run `npm install
+--package-lock-only --ignore-scripts` in `build/agentry-browser/`, copy the
+Chromium revision and version from the new `playwright-core`'s `browsers.json`
+into `source.env` with `MCP_VERSION` and `PLAYWRIGHT_VERSION`, download each
+architecture's archive from
+`https://storage.googleapis.com/chrome-for-testing-public/<version>/`, check it
+against Google's MD5 and record its SHA-256.
 
-It runs as uid 10001 (`codex`), never root. `CODEX_HOME` is the user's home,
-`/home/codex`, which the runner mounts as a tmpfs over a read-only root, as it
-does for docker-agent's home. It is the home itself because Codex does not
-create a missing `CODEX_HOME` (with a tmpfs over the home, a directory inside
-it would be gone), and it is not under `/tmp`, where Codex refuses its helper
-links. Without a writable `CODEX_HOME` Codex still prints its version, with a
-warning, but cannot keep its state. No `bwrap` is installed. Codex's own
-sandbox code is in the binary, but it starts only for a shell or patch tool,
-which the adapter does not offer (plan §3 I1, the adapter's to keep), and
-Codex's start-up check only warns (plan D5).
+### agentry-docker-agent-src
 
-**The check.** `scripts/check.sh --codex-image <ref>` runs the image the way
-the CLI runs a harness: no network, every capability dropped, no new
-privileges, a read-only root, the image's own user, a tmpfs on its home.
-It fails unless the user is not root, `codex --version` prints the pinned
-version, Codex writes to and reads its configuration from `CODEX_HOME`, the licence files, the release
-record and the bundle are present, no file is setuid or setgid, the binary
-is static, its SHA-256 is the release record's, and it verifies again against
-OpenAI's signature (it needs a container runtime, `cosign`, `file`, and
-network to reach Sigstore). It ran
-against a local amd64 build on 2026-10-09 with every line `ok`.
-
-**Publishing and signing.** The `codex` workflow (manual dispatch, from `main`
-only) follows the files image: native amd64 and arm64 builds, the check on
-each before its push, the digests joined into one tag, the joined digest
-checked again, signed with cosign, keyless, as the workflow, and verified.
-The tag is the Codex version, the UTC date and the run number
-(`0.162.0-2026.10.09.1`). The packages `agentry-codex` and `agentry-cosign`
-are created by the workflow in this public repository, so they are public.
-The `agentry-codex` row in `images.tsv` then takes the tag and its digest,
-and the CLI pins that digest as its default Codex harness image. Verify a
-published digest with:
-
-```
-cosign verify ghcr.io/blaktron/agentry-codex@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/codex.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-and the Codex binary inside it against OpenAI's signature with
-`scripts/check.sh --codex-image ghcr.io/blaktron/agentry-codex@<digest>`.
-
-The first build is `ghcr.io/blaktron/agentry-codex:0.162.0-2026.10.09.1@sha256:e6b0c020b797d7941b4365f82e743f190f82342f087621bddf57b087e4d703f9`
-(run 37965185630, 2026-10-09): amd64 `e4b56749…` and arm64 `c9372dc4…`.
-Each architecture's build verified OpenAI's signature and refused all three
-negative controls. Each architecture, then the joined digest, passed every
-line of `--codex-image`; the arm64 binary's SHA-256 is `7993e8a9…`, the amd64
-one's `50ed828f…`. The signature verified from the workstation the same day,
-`--codex-image` passed there against the published digest, and anonymous
-manifest fetches of `agentry-codex` and `agentry-cosign` answered 200. The
-native images report 302,726,038 bytes (amd64) and 263,424,091 (arm64) in
-the build jobs' Docker size reports.
-
-**Bumping Codex.** By hand; nothing moves it on its own. OpenAI releases a
-stable Codex every few days, and a bump is worth it for a fix the adapter
-needs, not for every release.
-
-1. Pick a stable release (`gh release list -R openai/codex --exclude-pre-releases`).
-2. In `build/agentry-codex/source.env`, set `CODEX_VERSION` and `CODEX_TAG`;
-   `CODEX_COMMIT` to the commit the tag names
-   (`gh api repos/openai/codex/git/ref/tags/<tag>`, then the tag object's
-   target); `CODEX_SHA256_AMD64` and `CODEX_SHA256_ARM64` to the SHA-256 of
-   each `codex-<arch>-unknown-linux-musl.tar.gz` (`gh release view <tag> -R
-   openai/codex --json assets` lists each asset's digest; check one by
-   download); and the two licence hashes if `LICENSE` or `NOTICE` changed at
-   that commit. Update the release line in `NOTICE`.
-3. Build locally (`scripts/build.sh` needs the mirrors; or `docker build`
-   with the two bases by digest) and run `scripts/check.sh --codex-image`.
-4. Merge, promote, dispatch the `codex` workflow from `main`, and record its
-   row in `images.tsv` in a second pull request.
-5. **Re-record the model sign-in conformance on the new version** before the
-   CLI's default moves: the codex container adapter's recordings and the
-   checks that no built-in tool is offered (`apply_patch`, `tool_search`,
-   shell; plan §3 I1), since a Codex release can switch a tool on. Only then
-   does the CLI pin the new digest.
-
-## The host link image
-
-`agentry-hostlink` holds the OpenSSH client the runner's **host link** uses to
-reach a **target host**, a machine the person names when a run starts
-(agentry-notes `plans/runtime-hosts.md` §4, D3, D5;
-agentry-dockerimages#71). The host link is a runner-owned container behind
-one relay to the host's address and port. It holds the host's credential in
-files bound into it alone and makes the SSH session; the agent never does.
-The runner image stays standard-library only (DR-2), so the client is
-OpenSSH, in an image of its own.
-
-| Package | Gives | Used for |
-|---|---|---|
-| `openssh-client-default` | `ssh` | one-shot commands, and an interactive shell on a remote pseudo-terminal (`ssh -tt`) |
-| `openssh-client-common` | `sftp`, `ssh-keyscan` (and `scp`, `ssh-add`, `ssh-agent`, which come in the same package) | file reads, writes and copies; the key of an unknown host |
-| `openssh-keygen` | `ssh-keygen` | a key's fingerprint, a `known_hosts` lookup |
-
-It is our mirror of `alpine:3.22`, the runner image's own runtime base, with
-those packages and their dependencies (libedit, ncurses' library and its
-terminfo data; `apk`'s world is the base's plus those three) and nothing
-else. Alpine's `openssh-keysign`, the
-client's one setuid program, is not installed, and the image has no setuid
-or setgid file. `/etc/agentry/hostlink/packages` lists the versions apk
-resolved, one `name-version` a line, for the receipt. A password reaches
-`ssh` through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force`, which this
-OpenSSH has, so no `sshpass` is installed.
-
-It holds no runner binary: the CLI adds its own in an offline layer `FROM`
-the pinned digest, as it does for the files image (agentry-cli#861).
-
-`openssh-client-common` also holds `scp`, `ssh-add`, `ssh-agent`,
-`ssh-copy-id` and `ssh-pkcs11-helper`, which the host link does not use. The
-image itself forwards nothing: it has no agent socket and no configuration.
-No forwarding of any kind (the plan's invariant 5) is held by the runner's
-`ssh` arguments and tested there, not here; the CLI's minimize step can drop
-the programs its catalogue does not name.
-
-**The user.** The image runs as uid 10001 (`hostlink`, home `/home/hostlink`),
-never root. `ssh` will not start for a uid that has no passwd entry ("No
-user exists for uid …"), so a host link run as another uid needs a passwd
-line for that uid bound in. `ssh` also holds a private key file to mode 0600
-only when the uid running it owns the file. A key the runner writes 0600 as
-the person is therefore readable by a host link run as the person's uid with
-a passwd line, and not by uid 10001. The check below proves both ways work
-(uid 10001 reads a 0644 copy of the key it makes, the invoking uid its own
-0600 one);
-the runner picks one at agentry-cli#861 (register entry DR-91).
-
-**The check.** `scripts/check.sh --hostlink-image <ref>` runs the image the
-way the runner runs a host link: every capability dropped, no new
-privileges, a read-only root, a tmpfs home, the image's own user, and the
-credentials bound read-only. It starts a throwaway OpenSSH server (our
-`alpine:3.22` mirror with `openssh-server`, built by the check) on an
-internal Docker network with no route out, with keys made fresh for the
-check. It fails unless:
-
-- the user is uid 10001;
-- the package record names each package at a version, and `apk`'s world is
-  the base's plus the three packages;
-- no file is setuid or setgid;
-- `ssh -V` runs, and `sftp`, `ssh-keyscan` and `ssh-keygen` are present;
-- `ssh-keyscan` reads the server's key, and it is the key made for it;
-- `ssh` logs in with a key and runs a command, opens a remote
-  pseudo-terminal with `-tt`, and runs what is sent over stdin to a login
-  shell there;
-- `ssh` unlocks a passphrase-protected key through `SSH_ASKPASS`;
-- on a second port, `ssh-keyscan` reads the key as `[target]:2222`, and `ssh`
-  checks it under `HostKeyAlias`, as it will through the relay, where the
-  address it dials is not the host's;
-- `sftp` copies a file to the server and back unchanged;
-- `ssh` logs in with a password through `SSH_ASKPASS`;
-- a changed host key is refused ("REMOTE HOST IDENTIFICATION HAS CHANGED"),
-  and so is an unknown one with `StrictHostKeyChecking=yes` ("No ED25519 host
-  key is known"), each before any command runs;
-- `ssh` runs as the invoking uid given a passwd line for it, with that uid's
-  own 0600 key.
-
-**Publishing and signing.** The `hostlink` workflow (manual dispatch, from
-`main` only) works as the `files` workflow does:
-- it builds each architecture natively and runs the check on each before
-  pushing it;
-- it joins the pushed digests into one tag named for the UTC date and the
-  run number, refusing a tag that exists;
-- it checks the joined digest again, signs it with cosign, keyless, as the
-  workflow itself, and verifies the signature before it reports the
-  `images.tsv` row.
-
-Verify a published digest with:
-
-```
-cosign verify ghcr.io/blaktron/agentry-hostlink@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/hostlink.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-The `agentry-hostlink` row in `images.tsv` then takes the tag and its
-digest, and the CLI pins that digest (agentry-cli#861). A rebuild is a new
-tag and a new digest, never an overwrite.
-
-The first build is `ghcr.io/blaktron/agentry-hostlink:2026.10.11.1@sha256:66f9fc5ce5223278676faad73d9cde005784ea6a35a64258ca47d1c662c0b099`
-(run 38171382190, 2026-10-11): amd64 `d4dd23ae…` and arm64 `cf116703…`.
-Each architecture, then the joined digest, passed every line of the check.
-The signature verified from the workstation the same day, an anonymous
-manifest fetch answered 200, and the check passed again there against the
-published digest. Its packages: `openssh-client-default-10.0_p1-r10`,
-`openssh-client-common-10.0_p1-r10` and `openssh-keygen-10.0_p1-r10`
-(OpenSSH 10.0p2, OpenSSL 3.5.8). The native images report 12,845,024 bytes
-(amd64) and 13,370,036 bytes (arm64) in the build jobs' Docker size reports.
-
-## The browser image
-
-`agentry-browser` is the browser server a QuickAgent that declares
-`capabilities.browser` gets (agentry-notes `plans/browser-testing.md` §4, §7,
-D3, D5, D14; agentry-dockerimages#82): Microsoft's
-[`@playwright/mcp`](https://github.com/microsoft/playwright-mcp) driving a
-headless Chrome for Testing. The runner starts it as a server in the run's
-gateway, behind one relay to the run's browse proxy, its only route out. The
-settings that hold a run (the proxy, the tool filter, Chromium's sandbox, the
-output folder, the secrets file) are the runner's, passed when it starts the
-server; the image holds what they need.
-
-| Part | From | Held by |
-|---|---|---|
-| `@playwright/mcp` 0.0.83 in `/app` | npm, `npm ci --ignore-scripts --omit=dev` on our `node:24-bookworm-slim` mirror | `package-lock.json`: an exact version and a sha512 integrity for each of its three packages; no install script runs |
-| Node 24 at `/usr/local/bin/node` | the same mirror, the one file the image takes from it | the mirror's digest (Playwright needs Node 20 or later; noble's own is 18) |
-| Chrome for Testing 155.0.8059.12 (revision 1247) in `/ms-playwright` | Google's Chrome for Testing bucket, the archive Playwright's own installer fetches (its CDN redirects there) | `source.env`: a SHA-256 for each architecture's archive; the build refuses unless the lockfile's `playwright-core` names that same revision and version in its `browsers.json` (`fetch.sh`) |
-| the system libraries | Ubuntu's archive | Playwright's own `install-deps chromium`, which names the packages for 24.04. Their versions are the archive's on the day of the build: recorded in `/etc/agentry/browser/packages`, not pinned |
-| the Chrome policy at `/etc/opt/chrome_for_testing/policies/managed/agentry.json` | `policy.json` | the check below |
-
-It is our mirror of `ubuntu:noble`, the base the operator chose after the
-plan's M1 (agentry-cli#914). Microsoft's own `mcr.microsoft.com/playwright`
-base bundles every browser at the stable release's revisions, which never
-match `@playwright/mcp`'s: every release of the server so far pins an alpha
-Playwright. That base also carries 15 setuid programs. A local amd64 build
-of this image was 1.42 GB on 2026-10-13, where M1's probe on Microsoft's
-base was 4.1–4.7 GB.
-
-**What the SHA-256 rests on.** Chrome for Testing publishes no signature.
-Each archive's SHA-256 in `source.env` was taken from a download that matched
-the MD5 Google stores for the object (its `x-goog-hash`); from then on every
-build is held to it.
-
-**The full build, not the headless shell.** `@playwright/mcp`'s
-`--browser chromium` launches Chrome for Testing even headless, and the
-headless shell ignores enterprise policies, so the image holds the full build
-and nothing else in `/ms-playwright`.
-
-**The policy.** The browse proxy refuses a TLS ClientHello that offers
-Encrypted Client Hello, because then the name a CDN routes by is hidden
-(agentry-cli#616). Chromium sends a GREASE ECH extension on every
-connection, and no launch flag stops it; only the policy
-`EncryptedClientHelloEnabled: false` does, read from this path alone (M1).
-The same file turns off QUIC, DNS-over-HTTPS, WebRTC UDP that does not go
-through the proxy, component updates, and Google's background services
-(autofill, the password manager, sign-in, sync, search suggestions, network
-prediction, metrics, Safe Browsing, translate, spell-check). The check below
-proves the ECH key live; the others it holds only as keys in `policy.json`
-(`checkBrowser` requires ECH, QUIC and DNS-over-HTTPS off), and M1 measured
-their effect behind a proxy (agentry-cli#914).
-
-**The user.** The image runs as uid 10001 (`browser`, home `/home/browser`),
-never root, in `/out-browser`, where the runner binds the run's
-`reports/browser/`: `@playwright/mcp` resolves a file name the model chooses
-against its working directory, and the gateway's catalog cannot set one. No
-file is setuid or setgid: the base's are stripped, and Chrome's
-`chrome_sandbox` helper is not made one. Chromium's own sandbox is the
-runner's to turn on (it needs user namespaces, which Docker's default
-seccomp profile refuses under runc; plan §7).
-
-`/etc/agentry/browser/record` names, one a line, the server's version,
-Playwright's, Node's, and the browser's revision, version, architecture and
-archive SHA-256, for the receipt. The licences are in
-`/usr/share/licenses/agentry-browser`: Node's, the three npm packages'
-(with Playwright's `NOTICE` and `ThirdPartyNotices.txt`), and Chrome for
-Testing's `ABOUT`, which points at the credits the browser carries itself
-(`chrome://credits`).
-
-**The check.** `scripts/check.sh --browser-image <ref>` runs the image the
-way the runner runs its browser server: no network, every capability
-dropped, no new privileges, a read-only root, the image's own user, a tmpfs
-home and `/tmp`, and an output folder bound read-write. It fails unless:
-
-- the user is uid 10001, the working directory `/out-browser` and the
-  entrypoint `@playwright/mcp`;
-- the record names `source.env`'s server and Playwright, and this
-  architecture's browser revision, version and SHA-256;
-- the browser is where the image's Playwright looks, and is the only build
-  in `/ms-playwright`;
-- the licences are there;
-- no file is setuid or setgid;
-- `check/probe.mjs`, run inside the image by its own Node and driving its
-  `@playwright/mcp` over stdio, as the gateway does, with two servers of its
-  own on loopback:
-  - initialize answers with `source.env`'s Playwright, and `tools/list` holds
-    the tools the runner's filter passes first, the testing and PDF ones
-    included;
-  - the fixture page renders, the browser that runs reports the record's
-    Chrome version, and `browser_verify_text_visible` finds its heading;
-  - a screenshot and a PDF with chosen names land in `/out-browser`, and a
-    name outside it is refused;
-  - a secret typed by name (`--secrets`, plan D9) reaches the field, and its
-    value appears in no result;
-  - the ClientHello Chromium sends names its host and offers no ECH;
-- the probe's control, run with the policy folder hidden, sees ECH offered,
-  which proves the listener would catch it and the policy is what stops it.
-
-**Publishing and signing.** The `browser` workflow (manual dispatch, from
-`main` only) works as the `hostlink` workflow does. It builds each
-architecture natively and checks it before pushing, joins the pushed digests
-into a tag named for the UTC date and the run number, checks the joined
-digest, signs it keyless as the workflow, and verifies the signature before
-it reports the `images.tsv` row:
-
-```
-cosign verify ghcr.io/blaktron/agentry-browser@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/browser.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-**A bump** is by hand. Set the new version in `package.json`, then run
-`npm install --package-lock-only --ignore-scripts` in `build/agentry-browser/`.
-Take the chromium revision and version the new `playwright-core`'s
-`browsers.json` names into `source.env`, with `MCP_VERSION` and
-`PLAYWRIGHT_VERSION`. Then download each architecture's
-`chrome-linux64.zip` and `chrome-linux-arm64.zip` from
-`https://storage.googleapis.com/chrome-for-testing-public/<version>/`, check
-each against the MD5 Google stores for it (the `x-goog-hash` header), and
-take its SHA-256. The tool names the runner's filter passes are re-read
-against the new server's (plan §7).
-
-The first build is `ghcr.io/blaktron/agentry-browser:2026.10.13.1@sha256:61bf9d5577ebf0aea1059bab30bd9e06a9c4011ba42792b06bd66f99c41b5af7`
-(run 38454240153, 2026-10-13): amd64 `5973ea46…` and arm64 `7e551e2c…`.
-Each architecture, then the joined digest, passed every line of the check.
-The signature verified from the workstation the same day, an anonymous
-manifest fetch answered 200, and the check passed again there against the
-published digest. The native images report 1,000,957,792 bytes (amd64) and
-1,024,059,674 bytes (arm64) in the build jobs' Docker size reports.
-
-## Building Docker Agent from source
-
-`build/docker-agent/` builds Docker Agent `v1.128.0` at commit
-`1a0e7ffbcbad4b2cbdd690f48689e87fb0c69599` (`source.env`).
+`build/docker-agent/` builds Docker Agent from the commit in `source.env`.
 `upstream.Dockerfile` is the vendor's Dockerfile at that commit, for
-comparison. Our Dockerfile differs from it in four ways:
+comparison. Ours differs in four ways: every base comes from the digest-pinned
+mirrors; the `docker-mcp` plugin is copied from a pinned digest instead of the
+floating `docker/mcp-gateway:v2`; `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is
+set; and it builds Linux only, without upstream's cross-compilation stages,
+with the binary checked to be statically linked. It is built for the build
+host's platform only, and needs several GB of free disk.
 
-1. Every base comes from our digest-pinned mirrors.
-2. The `docker-mcp` plugin is copied from a pinned digest instead of the
-   floating `docker/mcp-gateway:v2`.
-3. `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set.
-4. It builds Linux only, without upstream's cross-compilation stages. The
-   binary is still checked to be statically linked.
+### agentry-typst
 
-The result is published as `agentry-docker-agent-src`, separate from the
-`agentry-docker-agent` mirror, so the two can be compared. It is built for the
-build host's platform only, while the mirror has linux/amd64 and linux/arm64.
-A build needs several GB of free disk. It replaces the mirror only after it
-passes the CLI's live runner acceptance tests; the `agentry-docker-agent` row
-in `images.tsv` then changes from `mirror` to `build`.
-
-## Building Typst from source
-
-`build/typst/` builds [Typst](https://github.com/typst/typst) `v0.15.1` at
-commit `9dfd3a08500b7896045f907433cf7b4b02434fad` (Apache-2.0;
-`source.env`). It is the PDF renderer of the runner's `export_pdf` (agentry-notes
-`plans/scratch-and-pdf-reports.md` §5, D23 to D27; agentry-dockerimages#48).
-The result, `agentry-typst`, holds only files, for agentry-cli's runner image
-to `COPY --from=ghcr.io/blaktron/agentry-typst@<digest>`:
+`build/typst/` builds [Typst](https://github.com/typst/typst) at the commit in
+`source.env`. The result holds only files, for the runner image to
+`COPY --from=ghcr.io/blaktron/agentry-typst@<digest>`:
 
 | Path | What |
 |---|---|
 | `/typst` | the static binary; also the entrypoint, so the checks can run the image |
-| `/fonts/` | the Noto set: Sans, Serif and Mono for Latin, Greek and Cyrillic; Arabic, Hebrew, Thai, Devanagari, Bengali, Gujarati, Gurmukhi, Kannada, Malayalam, Oriya, Sinhala, Tamil, Telugu; Simplified Chinese and Korean; Symbols, Symbols 2, Math; Noto Color Emoji (COLRv1). And the report designs' fourteen families ([below](#the-report-design-families)). All OFL-1.1 |
-| `/typst-packages/` | the `cmarker` package 0.1.10 (MIT), as Typst's local package directory (`preview/cmarker/0.1.10/`), for `--package-path` |
-| `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence and notice files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv` for crates that ship none), the OFL text of each font source, and `fetch.tsv` |
+| `/fonts/` | the Noto set (Latin, Greek, Cyrillic, Arabic, Hebrew, Thai, the Indic scripts, Simplified Chinese, Korean, symbols, math, Noto Color Emoji) and the report designs' fourteen families. All OFL-1.1 |
+| `/typst-packages/` | the `cmarker` package (MIT), as Typst's local package directory, for `--package-path` |
+| `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv`), the OFL text of each font source, and `fetch.tsv` |
 
-Japanese text renders its kana from the Chinese font and its Han characters
-in Chinese forms, because no Japanese or Traditional Chinese font is bundled.
-A template's font list should put `Noto Color Emoji` straight after its
-text font. Typst takes each character from the first family in the list that
-has a glyph for it, and the CJK and symbol fonts also draw some emoji (⚠
-U+26A0, 🔒 U+1F512), in monochrome. Noto Sans covers the digits and marks
-that the emoji font also has, so those never fall through to it. The fixture
-template does this.
+Japanese text renders its kana from the Chinese font and its Han characters in
+Chinese forms; no Japanese or Traditional Chinese font is bundled. A template's
+font list should put `Noto Color Emoji` straight after its text font.
 
-The first local amd64 build on 2026-10-08 held a 40,204,288-byte binary.
-Upstream's own release binary is 55.7 MB, with its downloader and embedded
-fonts. The rest is 45 font files (about 42 MB) and cmarker (340 KB). The
-published images report 87,356,748 bytes (amd64) and 81,437,396 (arm64).
+**Built without Typst's package downloader.** Typst's cargo features cannot
+remove the downloader: typst-cli turns typst-kit's `system-downloader` (ureq,
+native-tls, OpenSSL) on unconditionally, so an `@preview` import that is not in
+the package directory is fetched from `packages.typst.org`. So the build uses
+`--no-default-features` (no HTTP server, no embedded fonts, since the fonts are
+the bundled set) and applies `disable-package-downloads.patch`, which removes
+`system-downloader` and `vendor-openssl` from typst-cli and replaces its
+downloader with one that refuses every request with "package downloads are
+disabled" (it touches `crates/typst-cli/Cargo.toml` and
+`crates/typst-cli/src/download.rs`). The patch is applied with no fuzz. The
+build fails if the binary's dependency list (`cargo tree`, normal
+dependencies) does not name typst-cli and typst-kit or names a network client
+(the list is in the Dockerfile), or if the binary needs a shared library or an
+interpreter. Re-check the patch at every Typst tag bump: it must still apply,
+the dependency check must pass, and `scripts/check.sh --typst-image` must
+still pass, including its `strace` run that finds no network system call.
 
-The pinned build is `ghcr.io/blaktron/agentry-typst:2026.10.09.2@sha256:da55b1dbe359c01def900853b2e65803bf783d8098b4ddcea6164ca946d38dd1`
-(run 37925989779, 2026-10-09; agentry-dockerimages#58), the first with the
-report designs' families: amd64 `ac721b55…` at 109,500,845 bytes and arm64
-`51ceee24…` at 103,581,493. Each architecture, then the joined digest, passed
-every `--typst-image` check, the families render included. The signature
-verified from the workstation, an anonymous manifest fetch answered 200, and
-the published amd64 digest passed the check there too, its families pages
-byte-identical to the local build's.
+**Fonts and package.** `build/typst/fetch.sh` fetches them from the URLs in
+`build/typst/fetch.tsv`, each at a pinned commit; a file whose SHA-256 differs
+fails the build, and the licence column names each file's licence. The sources
+are `notofonts/notofonts.github.io`, `notofonts/noto-cjk`,
+`googlefonts/noto-emoji`, `google/fonts` and `typst/packages` (cmarker, whose
+`raw-typst` default is `true`; the runner's template passes `raw-typst: false`
+so Markdown never injects Typst code). The fourteen report design families are
+Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat, Source Serif 4,
+Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair Display, IBM Plex
+Mono, JetBrains Mono and Source Code Pro, all OFL-1.1 from one pinned
+`google/fonts` commit. Twelve ship there as variable fonts, which `fetch.tsv`
+saves as `*-Variable.ttf`. `fixtures/fonts.txt` lists the families after
+Noto's; the check renders `fixtures/families.typ` with each and fails on an
+"unknown font family" warning.
 
-The first build was `ghcr.io/blaktron/agentry-typst:2026.10.08.1@sha256:37eb0ef5b52af3abd4635f249fa06e6aab4a13626abda482d40bdfe9a38828b9`
-(run 37784329814, 2026-10-08): amd64 `d0fe82c2…` and arm64 `027b84c3…`.
-Each architecture, then the joined digest, passed every `--typst-image`
-check. arm64's binary is statically linked; amd64's is static-pie. 311 crates
-are linked into the binary, and 12 of them ship no licence file. The run's
-amd64 PNG pages are byte-identical to the local build's. The signature
-verified from the workstation, and an anonymous manifest fetch of
-`agentry-typst` and `agentry-rust-alpine` answered 200 the same day.
+PDF reports are described at
+<https://docs.secureagentry.net/runner/#pdf-reports-export_pdf>.
 
-**Without its package downloader (D26).** Typst's cargo features cannot
-remove the downloader. typst-cli turns typst-kit's `system-downloader` (ureq,
-native-tls, OpenSSL) on unconditionally, and always builds the Universe
-package source, so an `@preview` import that is not in the package directory
-is fetched from `packages.typst.org`. Checked at v0.15.1, where the upstream
-binary under `--network none` sent a DNS query before failing. Its features
-cover only `embedded-fonts` and `http-server` (the defaults) and
-`self-update`. So:
+### agentry-ripgrep
 
-- the build uses `--no-default-features`: no HTTP server and no embedded
-  fonts, since the fonts are the bundled set;
-- `disable-package-downloads.patch` (the operator's decision, 2026-10-08):
-  - removes `system-downloader` and the `vendor-openssl` feature from
-    typst-cli;
-  - replaces its downloader with one that refuses every request with
-    "package downloads are disabled".
+`build/ripgrep/` builds [ripgrep](https://github.com/BurntSushi/ripgrep) at the
+commit in `source.env`, on the `agentry-rust-alpine` builder, with its default
+features only: no PCRE2. The Dockerfile refuses a dependency tree that names
+PCRE2 or a common network client crate, and a binary that needs a shared
+library or an interpreter. On 64-bit musl ripgrep links jemalloc, which its
+build compiles from vendored source.
 
-  It touches two files, `crates/typst-cli/Cargo.toml` and
-  `crates/typst-cli/src/download.rs`.
-
-The patch is applied with no fuzz. The build fails if the binary's
-dependency list (`cargo tree`, normal dependencies) does not name typst-cli
-and typst-kit, or names a network client (the list is in the Dockerfile:
-ureq, native-tls, OpenSSL, rustls, hyper, reqwest, curl and others). It also
-fails if the binary needs a shared library or an interpreter. **Re-check the
-patch at every Typst tag bump.** It must still apply, the build's dependency
-check must pass, and `scripts/check.sh --typst-image` must still pass.
-
-**The fonts and the package** are fetched by `build/typst/fetch.sh` from the
-URLs in `build/typst/fetch.tsv`, each at a pinned commit. A file whose SHA-256
-differs fails the build. The sources:
-
-- the Noto project's published builds, `notofonts/notofonts.github.io`;
-- `notofonts/noto-cjk`, for the CJK region subsets;
-- `googlefonts/noto-emoji` at `v2.051`;
-- `google/fonts`, for the report designs' families
-  ([below](#the-report-design-families));
-- `typst/packages`, for cmarker.
-
-The licence column of `fetch.tsv` names each file's licence, and
-`licenses/fonts/` holds the OFL text of every font source repository.
-cmarker's own default for `raw-typst` is `true`. The runner's template must
-pass `raw-typst: false`, so the Markdown never injects Typst code; that is
-the template's job (agentry-cli, M3). The check's fixture template does the
-same.
-
-### The report design families
-
-The report designs (agentry-notes `plans/report-designs.md`, D3 and D13;
-agentry-dockerimages#58) set their headings, body and code in one of fourteen
-open-licence families, with Noto behind each for the scripts it lacks:
-
-- sans: Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat (headings);
-- serif: Source Serif 4, Lora, Merriweather, IBM Plex Serif, EB Garamond,
-  Playfair Display (headings);
-- mono: IBM Plex Mono, JetBrains Mono, Source Code Pro.
-
-All come from `google/fonts` at one pinned commit (`62e55e58`, 2026-10-09),
-Google Fonts' published build of each family, under OFL-1.1 with the
-`OFL.txt` of each family's directory in `/licenses/fonts/`. That is one source
-for all fourteen, and its family names are the ones the site's editor uses for
-its web-font preview. Upstream's own repositories do not all commit a TTF: Inter's ships
-its static faces only as WOFF2, which Typst does not read, and Playfair
-Display's repository now holds its successor. Twelve families ship there only
-as a variable roman and a variable italic, which `fetch.tsv` saves as
-`*-Variable.ttf`. They carry every weight, and Typst 0.15.1 instances them,
-in the PDF as well as the PNG: checked by rasterising the PDF with poppler,
-not only Typst's own PNG. A variable family's PDF font name is still its
-default instance's (`Montserrat-Thin`, `SourceCodePro-ExtraLight`), which is
-only the name. IBM Plex Serif and IBM Plex Mono ship static there, and take
-Regular, Italic, Bold and Bold Italic. Together they add 32 font files, about
-22 MB; Merriweather's three axes make it 9 MB of that.
-
-`fixtures/fonts.txt` lists the families after Noto's, and every family there
-whose name does not start with "Noto" is a design family. The check renders
-`fixtures/families.typ` once with all of them. Each family gets a block of
-regular, bold, italic and bold italic text, with a line of Chinese, Arabic and
-Hindi behind it. The check fails on an "unknown font family" warning, since
-Typst would otherwise set the text in the next family without failing. It
-also fails unless the PDF is tagged PDF/UA-1 and embeds every design family
-and Noto's SC, Arabic and Devanagari fonts.
-
-**The check.** `scripts/check.sh --typst-image <ref>` runs the image the way
-`export_pdf` will. The container has no network, every capability dropped, a
-read-only root and the invoking uid, with only the bundled fonts and
-packages (`--ignore-system-fonts --font-path /fonts --package-path
-/typst-packages`). The check:
-
-1. asserts that `typst fonts` lists every family in
-   `build/typst/fixtures/fonts.txt`;
-2. renders `build/typst/fixtures/report.typ` with `--pdf-standard ua-1` to a
-   PDF that must carry a structure tree and the PDF/UA identification. The
-   report is the 2026-10-08 prototype's sample: Chinese, Arabic RTL, Hindi,
-   emoji, a table, code, a local image, a long unbreakable token. It adds a
-   line each of Hebrew, Thai, Korean, Japanese, Bengali, Tamil, Telugu, Greek,
-   Cyrillic and symbols;
-3. renders the same report to PNG pages, which land in `$OUT_DIR` for a
-   person to look at;
-4. compiles `fixtures/import.typ`, which imports `@preview/whatever:0.1.0`.
-   It must fail with "package downloads are disabled";
-5. runs that import and the report again under `strace -e
-   trace=%network,execve`, in a helper built from our `agentry-alpine` mirror
-   with `strace`, `file` and the image's files. Building the helper needs
-   network; the traced runs have none. The check fails on any network system
-   call, if the traced import does not reach the refusing downloader, if the
-   traced report does not render, and unless `file` calls `/typst` static.
-   Against the upstream binary, the same trace shows its DNS query to port 53.
-
-**Publishing and signing.** The `typst` workflow publishes the image as the
-`files` workflow publishes `agentry-files` (manual dispatch, from `main`
-only). Its `prepare` job also mirrors the builder base, `agentry-rust-alpine`
-(`rust:1.98.1-alpine3.22` by digest), so a workflow creates that package and
-it is public. The workflow:
-
-- builds amd64 and arm64 natively;
-- runs the check on each before pushing it, and keeps the PDF and PNG pages
-  as a run artifact;
-- joins the pushed digests into one tag named for the UTC date and the run
-  number;
-- checks that digest again, then signs it with cosign, keyless, and
-  verifies the signature.
-
-Verify a published digest with:
-
-```
-cosign verify ghcr.io/blaktron/agentry-typst@<digest> \
-  --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/typst.yaml@refs/heads/main \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-```
-
-`scripts/build.sh` passes an upstream context's own directory to the build as
-the named context `agentry`. That is how the patch, `fetch.tsv` and
-`fetch.sh` reach the Dockerfile without being mixed into Typst's tree. A
-local build needs several GB of disk; on 2026-10-08 the release build took
-12 minutes on the 8-core workstation.
-
-## The ripgrep image
-
-`build/ripgrep/` builds [ripgrep](https://github.com/BurntSushi/ripgrep)
-`15.2.0` at commit `e89fff89ac9af12e8d4ce9d5fd07beb408ca730f` from source
-(agentry-dockerimages#81; agentry-notes `plans/ripgrep-search.md` D1, D3,
-D9), on the same digest-pinned `agentry-rust-alpine` builder Typst uses, with
-its default features only: no PCRE2. The Dockerfile refuses a dependency tree
-that names one of a list of crates (PCRE2's and the common network clients'),
-and a binary that needs a shared library or an interpreter. On 64-bit musl ripgrep links jemalloc, which its
-build compiles from the vendored source (upstream's choice, kept).
-
-The result, `agentry-ripgrep`, holds only files, for agentry-cli's runner
-image to `COPY --from=ghcr.io/blaktron/agentry-ripgrep@<digest>`, where the
-tools server will run it for `grep` and `glob` with a fixed argument list
-that never asks it to start another program (agentry-cli#912):
-
-| Path | What |
-|---|---|
-| `/rg` | the static binary; also the entrypoint, so the checks can run the image |
-| `/licenses/` | ripgrep's `COPYING`, `LICENSE-MIT` and `UNLICENSE`, and the licence files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv`) |
-
-`scripts/check.sh --ripgrep-image <ref>` runs it the way the tools server
-will call it, with every flag the plan fixes (`--json --no-config --no-ignore
---hidden --glob '!.git'` and the size, column, thread and regex caps): no
-network, every capability dropped, no new privileges, a read-only root, the
-invoking uid, no environment of its own and 512 MiB, over
-`build/ripgrep/fixtures/tree`. It holds the version (without PCRE2), a
-case-blind search to exactly the three fixture files that hold the word (one
-named by a `.gitignore`, one hidden), a pattern past the size limit to being
-refused, `--files` to every fixture, the binary to static, the licences to
-being there, and a traced search to no network system call and no second
-`execve`. That shows this invocation starts no program; that the tools
-server never passes a flag that would (`--pre`, `--search-zip`) is the CLI's
-to hold and test. The tools server's own holding (its uid, Landlock, the
-time limit) is the CLI's too.
-
-A local amd64 build on the workstation (2026-10-13) passed every check: 27
-crates linked, each with its licence file; a static-pie binary; an image of
-9,275,888 bytes. The `ripgrep` workflow (dispatched from `main`) builds both
-architectures natively, checks each, joins them, signs the joined digest
-keyless and verifies the signature; its run's summary prints the
-`images.tsv` row.
-
-The pinned build is `ghcr.io/blaktron/agentry-ripgrep:2026.10.13.2@sha256:2891a3998ffa4877998ad7f167ea00971e09fa3c68dcafc128e609c8cabee718`
-(run 38390353450, 2026-10-13): amd64 `36c0427c…` and arm64 `6938a315…`,
-each checked before it was pushed, the joined digest checked again, then
-signed and verified. The signature verified from the workstation and an
-anonymous manifest fetch answered 200 the same day. The amd64 binary's build
-ID is the local build's (`182e10dc…`): the build reproduced. The first run
-(38389401256) pushed both architectures but stopped at the joined digest's
-check, whose version line read the runtime's pull progress (fixed in #85);
-its tag `2026.10.13.1` was never signed and is not used.
+The result holds only files, for the runner image to
+`COPY --from=ghcr.io/blaktron/agentry-ripgrep@<digest>`: `/rg` (the static
+binary, also the entrypoint) and `/licenses/` (ripgrep's `COPYING`,
+`LICENSE-MIT` and `UNLICENSE`, and the licence files of every crate linked into
+the binary, with `crates.tsv` and `no-licence-file.tsv`).
+`scripts/check.sh --ripgrep-image <ref>` runs it with the fixed flags the tools
+server passes (`--json --no-config --no-ignore --hidden --glob '!.git'` and the
+size, column, thread and regex caps) over `build/ripgrep/fixtures/tree`, and
+traces a search to show it makes no network system call and starts no second
+program.
 
 ## Licence
 
 The scripts, build contexts and manifest are MIT-licensed (`LICENSE`). Mirrored
 and built images keep their own licences; `NOTICE` lists each one and the
-changes we make to Docker Agent, which is Apache-2.0. Nothing built here is a
+changes made to Docker Agent, which is Apache-2.0. Nothing built here is a
 Docker product.
