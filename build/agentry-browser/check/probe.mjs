@@ -32,7 +32,7 @@ const fail = (m) => {
 	failed = true;
 };
 
-// The secret the server types by name (plan §7.1): a made-up value, which
+// The secret the server types by name: a made-up value, which
 // must never come back in a result.
 const secretName = "CHECK_SECRET";
 const secretValue = "probe-value-7f3a9c";
@@ -85,7 +85,7 @@ function parseHello(b) {
 writeFileSync("/tmp/browser-check.json", JSON.stringify({
 	browser: {
 		launchOptions: {
-			// The runner decides the sandbox (plan §7); a check container keeps
+			// The runner decides the sandbox; a check container keeps
 			// Docker's default seccomp profile, where Chromium's cannot start.
 			chromiumSandbox: false,
 			args: ["--host-resolver-rules=MAP *.test 127.0.0.1"],
@@ -151,9 +151,9 @@ try {
 	server.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
 
 	const tools = (await rpc("tools/list", {})).result.tools.map((t) => t.name);
-	// A sample of the tools the runner's filter passes (agentry-notes
-	// plans/browser-testing.md §7, held by agentry-cli at M4), the testing and
-	// PDF ones included: a server bump that renames one fails here first.
+	// A sample of the tools the runner's filter passes (held by
+	// agentry-cli), the testing and PDF ones included: a server bump that
+	// renames one fails here first.
 	const want = ["browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_fill_form",
 		"browser_take_screenshot", "browser_evaluate", "browser_network_requests", "browser_console_messages",
 		"browser_verify_text_visible", "browser_verify_element_visible", "browser_generate_locator", "browser_pdf_save"];
@@ -195,7 +195,7 @@ try {
 		r = await call("browser_take_screenshot", { filename: "/etc/escape.png" });
 		r.isError ? ok("a file name outside /out-browser is refused") : fail("a screenshot to /etc/escape.png was not refused");
 
-		// D9: the model passes a secret's name; the server types its value and
+		// The model passes a secret's name; the server types its value and
 		// never returns it.
 		r = await call("browser_type", { element: "the user field", target: "#user", text: secretName });
 		const typed = r;

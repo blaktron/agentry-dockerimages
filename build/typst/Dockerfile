@@ -1,7 +1,5 @@
 # Typst, built from pinned upstream source, with the Noto fonts, the report
-# designs' font families and the cmarker package, as a files-only image
-# (agentry-notes plans/scratch-and-pdf-reports.md §5, D23, D25, D26, D27;
-# agentry-dockerimages#48; plans/report-designs.md D13, agentry-dockerimages#58).
+# designs' font families and the cmarker package, as a files-only image.
 #
 #   upstream   github.com/typst/typst
 #   commit     source.env beside this file

@@ -99,7 +99,7 @@ if [ "$merge" = 1 ]; then
 	parts=()
 	if [ -n "${PART_DIGESTS:-}" ]; then
 		# By digest: a tag can be re-pointed between the push that was checked
-		# and this merge, a digest cannot (agentry-dockerimages#28).
+		# and this merge, a digest cannot.
 		for p in ${PLATFORMS//,/ }; do
 			d=$(tr ' ' '\n' <<<"$PART_DIGESTS" | sed -n "s/^${p##*/}=//p")
 			[[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || {

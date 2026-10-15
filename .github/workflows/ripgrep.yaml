@@ -1,8 +1,7 @@
 # Build, check, sign and publish agentry-ripgrep to ghcr.io/blaktron. It holds
 # ripgrep built from pinned source with its default features (no PCRE2),
 # static, files only, which the runner image copies by digest for the tools
-# server's grep and glob (agentry-notes plans/ripgrep-search.md D1, D3, D9;
-# agentry-dockerimages#81).
+# server's grep and glob.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -58,7 +57,7 @@ jobs:
           echo "::error::dispatch this workflow from main; it pushes and signs public images"
           exit 1
 
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

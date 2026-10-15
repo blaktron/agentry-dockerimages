@@ -1,17 +1,15 @@
 # agentry-hostlink: the host link image, the OpenSSH client the runner's host
 # link uses to reach a target host, a machine the person names when a run
-# starts (agentry-notes plans/runtime-hosts.md §4, D3, D5;
-# agentry-dockerimages#71).
+# starts.
 #
 # The host link is a runner-owned container behind one relay to the host's
 # address and port. It holds the host's credential in files bound into it
 # alone, and makes the SSH session; the agent never does. The runner image
-# stays standard-library only (DR-2), so the client is OpenSSH, in an image
+# stays standard-library only, so the client is OpenSSH, in an image
 # of its own.
 #
 # It holds the client and no runner binary: the CLI adds its own runner in an
-# offline layer FROM this image's digest, as it does for the files image
-# (agentry-cli#559, #861).
+# offline layer FROM this image's digest, as it does for the files image.
 #
 #   openssh-client-default   ssh, the session itself (one-shot commands, and
 #                            an interactive shell on a remote pseudo-terminal)
@@ -22,7 +20,7 @@
 #
 # openssh-client-common also holds scp, ssh-add, ssh-agent, ssh-copy-id and
 # ssh-pkcs11-helper. The host link uses none of them, and no forwarding of
-# any kind (plan invariant 5) is the runner's ssh argv to hold; the CLI's
+# any kind is the runner's ssh argv to hold; the CLI's
 # minimize step can drop what its catalogue does not name.
 #
 # A password reaches ssh through SSH_ASKPASS with SSH_ASKPASS_REQUIRE=force,
@@ -30,8 +28,8 @@
 #
 # PACKAGES is the one list of what is installed: apk brings their dependencies
 # (libedit, ncurses' library and terminfo data; no setuid program), nothing
-# else is added. Alpine's
-# openssh-keysign, the one setuid part of the client, is not installed.
+# else is added. Alpine's openssh-keysign, the one setuid part of the client,
+# is not installed.
 # /etc/agentry/hostlink/packages records the version apk resolved for each of
 # PACKAGES, one `name-version` a line, so a receipt can name them.
 #
@@ -49,9 +47,9 @@ ARG ALPINE_IMAGE=alpine:3.22
 
 FROM ${ALPINE_IMAGE}
 ARG PACKAGES="openssh-client-default openssh-client-common openssh-keygen"
-# The index fetch from Alpine's CDN fails now and then (file-handling plan
-# §1.1). `apk add --no-cache` fetches the indexes itself, so the whole add is
-# retried half a minute apart; a failure is never taken as a success.
+# The index fetch from Alpine's CDN fails now and then.
+# `apk add --no-cache` fetches the indexes itself, so the whole add is retried
+# half a minute apart; a failure is never taken as a success.
 RUN for try in 1 2 3 4 5; do \
 		apk add --no-cache $PACKAGES && break; \
 		[ "$try" = 5 ] && exit 1; sleep 30; \

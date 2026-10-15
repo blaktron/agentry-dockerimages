@@ -26,7 +26,7 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
 
       # The same check the ci workflow runs on every pull request.
@@ -56,9 +56,8 @@ jobs:
             echo "::warning::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set, so this pulls from Docker Hub anonymously, limited to 100 pulls per IP, which a full mirror run can exceed"
           fi
 
-      # A run that names rows (a single pin moving, agentry-dockerimages#70)
-      # mirrors only those, so it re-pushes no built image whose tag others
-      # pull. The names reach the shell through env, never the script text,
+      # A run that names rows (a single pin moving) mirrors only those, so it
+      # re-pushes no built image whose tag others pull. The names reach the shell through env, never the script text,
       # and each must be an images.tsv name.
       - name: Mirror every mirrored image, or the named ones
         env:

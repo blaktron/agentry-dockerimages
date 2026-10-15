@@ -1,7 +1,7 @@
 # The font families scripts/check.sh --typst-image expects `typst fonts` to
 # list from /fonts, one a line: every family fetch.tsv brings. Every family
-# whose name does not start with "Noto" is a report design's family (plan
-# report-designs D13), and the check also renders families.typ in each one.
+# whose name does not start with "Noto" is a report design's family,
+# and the check also renders families.typ in each one.
 Noto Sans
 Noto Serif
 Noto Sans Mono

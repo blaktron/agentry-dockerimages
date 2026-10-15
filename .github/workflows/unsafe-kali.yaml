@@ -1,10 +1,9 @@
 # Build and publish agentry-unsafe-kali, the base of the desktop's Unsafe Mode
-# exec images (agentry-notes plans/unsafe-mode.md §4.1, D9, D10;
-# agentry-dockerimages#15), to ghcr.io/blaktron.
+# exec images, to ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
-# that. The base is re-pinned by hand, monthly and on demand (D10):
+# that. The base is re-pinned by hand, monthly and on demand:
 # scripts/pin.sh reports that kalilinux/kali-rolling has moved, the new digest
 # goes into images.tsv in a pull request, and this workflow is dispatched on
 # the result. Each run is tagged with its UTC date and run number and refuses
@@ -15,7 +14,7 @@
 # the base has moved: a red scheduled run is the reminder to re-pin. That run
 # builds and pushes nothing.
 #
-# Each architecture is built natively (D9): amd64 on ubuntu-latest, arm64 on
+# Each architecture is built natively: amd64 on ubuntu-latest, arm64 on
 # ubuntu-24.04-arm. The command index is made from that architecture's Kali
 # Contents, and the fixture check runs on each image before it is pushed. This
 # repository is public, so both runners are free, and each is a fresh virtual
@@ -41,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # TODO: pin by commit SHA (agentry-cli#165).
+      # TODO: pin by commit SHA.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false

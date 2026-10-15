@@ -1,12 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# agentry-unsafe-kali: the base of the desktop's Unsafe Mode exec images
-# (agentry-notes plans/unsafe-mode.md §4.1; agentry-dockerimages#15).
+# agentry-unsafe-kali: the base of the desktop's Unsafe Mode exec images.
 #
 # A lean Kali Linux (kali-rolling) with ca-certificates, python3 and Python's
 # venv support, and three data files under /etc/agentry/unsafe/, two of which
-# the CLI reads when it builds a QuickAgent's exec image on top of this one
-# (Unsafe Mode M2):
+# the CLI reads when it builds a QuickAgent's exec image on top of this one:
 #
 #   commands.tsv   the command index: command → the Kali package that ships it,
 #                  generated here from Kali's Contents-<arch> by make-index.py
@@ -30,8 +28,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # signed, whichever mirror http.kali.org redirects to.
 # http.kali.org redirects each request to a mirror. While Kali publishes a
 # new index, the InRelease one mirror serves and the Packages another serves
-# can disagree, and apt refuses the mismatch (run 36709803897, whose two
-# attempts both met it on 2026-09-30). A failed update is retried a minute
+# can disagree, and apt refuses the mismatch. A failed update is retried a minute
 # apart, which reaches other mirrors and outlasts a sync; it is never taken
 # as a success.
 RUN for try in 1 2 3 4 5; do apt-get update && break; [ "$try" = 5 ] && exit 1; sleep 60; done \
@@ -60,8 +57,8 @@ RUN for try in 1 2 3 4 5; do apt-get update && break; [ "$try" = 5 ] && exit 1; 
 	&& apt-get clean \
 	&& rm -rf /var/lib/apt/lists/*
 COPY --from=index /out/ /etc/agentry/unsafe/
-# Index the programs this base already carries that the index lacks
-# (agentry-dockerimages#23): alternatives links such as awk, which and pager,
+# Index the programs this base already carries that the index lacks:
+# alternatives links such as awk, which and pager,
 # which Contents does not list, and programs Contents left ambiguous, such as
 # python3.14. Each gets a row naming the package that owns its target, read
 # from dpkg's lists after the installs above, so the CLI never calls a program
