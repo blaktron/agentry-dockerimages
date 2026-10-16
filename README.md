@@ -40,7 +40,8 @@ list. Built images are listed with what they are built from.
 | `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
 | `agentry-alpine` | `alpine:3.22` | mirror | The runner image's runtime base, and the base of the files and host link images. |
 | `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
-| `agentry-python-alpine` | `python:3.12-alpine` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares. |
+| `agentry-python-slim` | `python:3.12-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
+| `agentry-python-alpine` | `python:3.12-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
 | `agentry-unsafe-kali` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | The base of the desktop's Unsafe Mode exec images, amd64 and arm64. |
 | `agentry-files` | `alpine:3.22` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
 | `agentry-typst` | Typst, patched, plus the Noto fonts, the report designs' font families and the cmarker package (`build/typst/`) | build | The PDF renderer's files for `export_pdf`, files only, amd64 and arm64. |
