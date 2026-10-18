@@ -330,7 +330,7 @@ checkFiles() {
 filesImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" name tool phrase argv out want arch bad=0 n=0 archive listing
 	checkFiles || return 1
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	out=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: out is local
 	trap "rm -rf '$out'" EXIT
@@ -616,7 +616,7 @@ typstImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" out fam got bad=0 rc want alpine
 	local helper="local/agentry-typst-check:$$"
 	checkTypst || return 1
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	out=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: out and helper are local
 	trap "rm -rf '$out'; '$runtime' rmi -f '$helper' >/dev/null 2>&1 || true" EXIT
@@ -870,7 +870,7 @@ ripgrepImage() {
 		. "$RIPGREP_CTX/source.env"
 		echo "$UPSTREAM_TAG"
 	)
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	out=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: the locals are gone at exit
 	trap "rm -rf '$out'; '$runtime' rmi -f '$helper' >/dev/null 2>&1 || true" EXIT
@@ -1072,7 +1072,7 @@ codexImage() {
 	}
 	# shellcheck source=/dev/null
 	. "$CODEX_CTX/source.env"
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	out=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: out is local
 	trap "rm -rf '$out'" EXIT
@@ -1219,7 +1219,7 @@ hostlinkImage() {
 	net="agentry-check-hostlink-$tag"
 	sshd="agentry-check-sshd-$tag"
 	helper="agentry-check-sshd:$tag"
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	dir=$(mktemp -d)
 	# shellcheck disable=SC2064 # expand now: these are local
 	trap "$runtime rm -fv '$sshd' >/dev/null 2>&1; $runtime network rm '$net' >/dev/null 2>&1; $runtime image rm '$helper' >/dev/null 2>&1; rm -rf '$dir'" EXIT
@@ -1626,7 +1626,7 @@ PY
 browserImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid out dir
 	checkBrowser || return 1
-	# Local callers set TMPDIR under ~/scratch (CLAUDE.md).
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
 	dir=$(mktemp -d)
 	chmod 0777 "$dir"
 	# shellcheck disable=SC2064 # expand now: it is local
