@@ -1,0 +1,8 @@
+# Every path needs a maintainer's review before merge. The manifest, the
+# build contexts, the scripts and the workflows decide what a run pulls, so
+# they are listed explicitly.
+*               @blaktron
+/images.tsv     @blaktron
+/build/         @blaktron
+/scripts/       @blaktron
+/.github/       @blaktron
