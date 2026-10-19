@@ -123,9 +123,10 @@ fonts="fonts-liberation fonts-noto-color-emoji fonts-unifont xfonts-scalable fon
 retry $apt install -y "$deb" "$common" $fonts || refuse "installing chromium $CHROMIUM_DEB_VERSION failed"
 rm -rf "$work" /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
-[ "$(dpkg-query -W -f '${Version}' chromium)" = "$CHROMIUM_DEB_VERSION" ] &&
-	[ "$(dpkg-query -W -f '${Version}' chromium-common)" = "$CHROMIUM_DEB_VERSION" ] ||
-	refuse "chromium installed is not $CHROMIUM_DEB_VERSION"
+for p in chromium chromium-common; do
+	[ "$(dpkg-query -W -f '${Version}' "$p")" = "$CHROMIUM_DEB_VERSION" ] ||
+		refuse "$p installed is not $CHROMIUM_DEB_VERSION"
+done
 [ -x /usr/lib/chromium/chromium ] || refuse "no executable at /usr/lib/chromium/chromium"
 
 mkdir -p "$out"
