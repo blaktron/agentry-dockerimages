@@ -126,13 +126,47 @@ naming them — see each upstream repository.
 | `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
 | `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
+| `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
+| `agentry-python-slim` | `python:3.12-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
+| `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
+| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.3` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 
 "See upstream" means this repository has not audited the full dependency licence
 set of that image, and does not claim to. Mirroring preserves whatever terms the
 publisher shipped under; it does not relicense anything.
+
+## Source of the GPL and LGPL packages
+
+The mirrored images, and the images built on them (`agentry-codex`,
+`agentry-hostlink`, `agentry-files`, `agentry-unsafe-kali` and
+`agentry-browser`), carry Debian, Kali and Alpine packages, many under
+the GNU GPL and LGPL. The packages in them are the distribution's own,
+unchanged, and each distribution publishes the corresponding source of its
+packages. For the exact version in an image, the package's version is in its
+package database (`/var/lib/dpkg/status` on Debian and Kali,
+`/lib/apk/db/installed` on Alpine) and its licence in
+`/usr/share/doc/<package>/copyright` (Debian, Kali).
+
+- Debian (`agentry-python-slim`, `agentry-debian` and `agentry-browser`,
+  trixie; `agentry-node-bookworm`, bookworm): https://sources.debian.org/ for
+  browsing, https://deb.debian.org/debian/pool/ for the source archives, and
+  https://snapshot.debian.org/ for a version that is no longer in the
+  archive. `agentry-browser`'s packages all come from the snapshot named in
+  its record (`/etc/agentry/browser/record`), whose source archives are at
+  `https://snapshot.debian.org/archive/debian/<snapshot>/pool/` and
+  `https://snapshot.debian.org/archive/debian-security/<snapshot>/pool/`.
+- Kali (`agentry-kali-rolling`, `agentry-unsafe-kali`): the source files in
+  the package pool, http://http.kali.org/kali/pool/main/ (and `non-free` and
+  `contrib` beside it).
+- Alpine (the `agentry-*alpine*` images, `agentry-codex`, `agentry-hostlink`,
+  `agentry-files`): the package recipes (`APKBUILD`) and patches in
+  https://github.com/alpinelinux/aports at the branch named for the
+  release in the image's `/etc/alpine-release`, for example `3.22-stable`;
+  each recipe names the upstream source archive it builds.
 
 ## Not covered by this file
 
@@ -199,3 +233,75 @@ their own package licences. Nothing is built from source. What we add is
 ours, under MIT: the package record under /etc/agentry/hostlink/ and the
 hostlink user. OpenSSH is a project of OpenBSD; nothing built here is an
 OpenBSD or OpenSSH product.
+
+## agentry-ripgrep
+
+    Upstream:   https://github.com/BurntSushi/ripgrep
+    Commit:     e89fff89ac9af12e8d4ce9d5fd07beb408ca730f  (tag 15.2.0)
+    Licence:    Unlicense OR MIT
+    Our image:  agentry-ripgrep
+    Context:    build/ripgrep/
+
+ripgrep, by Andrew Gallant and its contributors, is built from the pinned
+upstream commit with its default features (no PCRE2) as a static binary, in an
+image that holds only the binary (`/rg`) and licence files. It is dual-licensed
+under the Unlicense or the MIT licence, at your option; `COPYING`,
+`LICENSE-MIT` and `UNLICENSE` are in the image under `/licenses/ripgrep/`.
+The Rust crates linked into the binary keep their own licences (MIT,
+Apache-2.0, Unlicense, and one `(Apache-2.0 OR MIT) AND BSD-3-Clause`): the
+licence and notice files of each are copied under `/licenses/crates/`,
+`/licenses/crates/crates.tsv` lists every crate with its version and declared
+licence, and `/licenses/crates/no-licence-file.tsv` names any crate that
+ships no licence file. The source is not modified.
+
+## agentry-browser
+
+    Base:       debian:trixie-slim, by digest (images.tsv, agentry-debian)
+    Context:    build/agentry-browser/
+    Our image:  agentry-browser
+
+The browser server image, for a QuickAgent that declares a browser. What is in
+it, and under which terms:
+
+- **Debian 13 (trixie)** and the packages `build/agentry-browser/install.sh`
+  installs from Debian's archive (Chromium, the libraries it depends on and
+  the fonts listed there), unchanged, each under its own licence in
+  `/usr/share/doc/<package>/copyright`, many of them GPL, LGPL or MPL. All of
+  them come from snapshot.debian.org at the timestamp in
+  `build/agentry-browser/source.env`; their names and versions are recorded
+  in `/etc/agentry/browser/packages`. Their source is in Debian's archive
+  (see "Source of the GPL and LGPL packages").
+- **Chromium** 155.0.8059.79, Debian's `chromium` package
+  155.0.8059.79-1~deb13u1 (with `chromium-common`), built by Debian from the
+  source of the Chromium open-source project
+  (https://www.chromium.org/), installed unchanged in `/usr/lib/chromium/` and
+  held to the package SHA-256s in `build/agentry-browser/source.env`.
+  Chromium's own code is under the BSD-3-Clause licence, and the third-party
+  code it bundles under their own open-source licences; Debian's copyright
+  file lists them and is at
+  `/usr/share/licenses/agentry-browser/chromium/copyright` (and
+  `/usr/share/doc/chromium-common/copyright`), and the browser lists them too
+  (`chrome://credits`). It comes from Debian's main archive, which holds only
+  free software, and carries no Widevine CDM. Its source: Debian's `chromium` source package at
+  that version, from
+  https://snapshot.debian.org/package/chromium/155.0.8059.79-1~deb13u1/
+  (or https://sources.debian.org/src/chromium/ while the version is current),
+  which is Chromium's released source with Debian's patches. The build adds
+  one file, the Chromium policy at
+  `/etc/chromium/policies/managed/agentry.json`.
+- **Node.js** 24, the one file `/usr/local/bin/node`, taken from the
+  `node:24-bookworm-slim` mirror: MIT, with the licences of the components it
+  bundles; Node's `LICENSE` is at
+  `/usr/share/licenses/agentry-browser/node/LICENSE`.
+- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** (with `playwright`),
+  copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
+  without change, in `/app`. Each package's `LICENSE` is under
+  `/usr/share/licenses/agentry-browser/`, and playwright-core's `NOTICE` and
+  `ThirdPartyNotices.txt` (the notices of its bundled third-party code) are in
+  `/usr/share/licenses/agentry-browser/playwright-core/`. Their npm
+  dependencies are installed with the package, each with the licence it
+  declares in `/app/node_modules/<package>/`. Playwright's own browser
+  download is not used: the image holds no browser but Debian's Chromium.
+
+What we add is ours, under MIT: the policy, the package and build record under
+`/etc/agentry/browser/`, and the browser user.

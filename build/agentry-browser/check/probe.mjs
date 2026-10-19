@@ -168,14 +168,15 @@ try {
 			? ok("the fixture page renders (its title is in the result)")
 			: fail(`navigate to the fixture: ${r.text.slice(0, 400)}`);
 
-		// The user agent string is reduced to 155.0.0.0; the full version
-		// is a high-entropy client hint.
+		// The user agent string is reduced to <major>.0.0.0; the full
+		// version and the brands are high-entropy client hints. An
+		// open-source Chromium build names no Google Chrome brand.
 		r = await call("browser_evaluate", {
-			function: "async () => (await navigator.userAgentData.getHighEntropyValues(['uaFullVersion'])).uaFullVersion",
+			function: "async () => { const h = await navigator.userAgentData.getHighEntropyValues(['uaFullVersion', 'fullVersionList']); return h.uaFullVersion + ' | ' + h.fullVersionList.map((b) => b.brand).join(', '); }",
 		});
-		r.text.includes(`"${record.chromium[1]}"`)
-			? ok(`the browser that runs is Chrome ${record.chromium[1]}, the record's`)
-			: fail(`the browser does not report Chrome ${record.chromium[1]}: ${r.text.slice(0, 300)}`);
+		r.text.includes(`${record.chromium[0]} | `) && r.text.includes("Chromium") && !/Google|Chrome for Testing/.test(r.text)
+			? ok(`the browser that runs is Chromium ${record.chromium[0]}, the record's, with no Google brand`)
+			: fail(`the browser does not report Chromium ${record.chromium[0]} alone: ${r.text.slice(0, 300)}`);
 
 		r = await call("browser_verify_text_visible", { text: "Fixture page" });
 		!r.isError ? ok("browser_verify_text_visible finds the heading") : fail(`verify text: ${r.text.slice(0, 300)}`);
@@ -219,7 +220,7 @@ try {
 	} else {
 		!h.ech
 			? ok("the ClientHello names its host and offers no ECH (the policy is read)")
-			: fail("the ClientHello offers ECH: the policy at /etc/opt/chrome_for_testing/policies/managed/ is not read");
+			: fail("the ClientHello offers ECH: the policy at /etc/chromium/policies/managed/ is not read");
 	}
 } catch (e) {
 	fail(String(e.message || e));
