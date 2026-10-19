@@ -6,6 +6,8 @@
 # It fails when:
 #   - a row of images.tsv does not have five tab-separated fields, its digest
 #     is not sha256:<64 hex>, its kind is not mirror or build, or it has no role;
+#   - a row of images.tsv has no section in NOTICE: a heading naming the image,
+#     an "Our image:" line, or a row of the mirror table;
 #   - a script in scripts/ fails `bash -n` or shellcheck;
 #   - a workflow in .github/workflows/ does not parse, or is not a workflow;
 #   - a job on a self-hosted runner can be reached by a pull request from a
@@ -192,6 +194,21 @@ checkManifest() {
 			;;
 		esac
 	done <"$MANIFEST"
+	return "$bad"
+}
+
+# checkNotice wants every image in the manifest to have a place in NOTICE: a
+# heading (## or ###) that names it, an "Our image:" line, or the first cell of
+# a row of the mirror table.
+checkNotice() {
+	local bad=0 name
+	while IFS=$'\t' read -r name _; do
+		if [[ "$name" =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+		if ! grep -Eq "^##+ (.* )?$name( |\$)|^ +Our image: +$name\$|^\| \`$name\` \|" NOTICE; then
+			echo "NOTICE: no section for $name (images.tsv)"
+			bad=1
+		fi
+	done < <(cut -f1 "$MANIFEST" | sort -u)
 	return "$bad"
 }
 
@@ -1738,7 +1755,7 @@ executable" ]; then
 
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser; do
+	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -1755,6 +1772,7 @@ SELF_TEST_CASES="
 clean -
 digest checkManifest
 role checkManifest
+notice checkNotice
 syntax checkScripts
 shellcheck checkScripts
 workflow checkWorkflows
@@ -1798,6 +1816,7 @@ breakCase() {
 	clean) ;;
 	digest) sed -i '0,/\tsha256:[0-9a-f]*\t/s//\tlatest\t/' images.tsv ;;
 	role) awk 'BEGIN { FS = OFS = "\t" } !done && !/^#/ && NF == 5 { NF = 4; done = 1 } 1' images.tsv >x && mv x images.tsv ;;
+	notice) sed -i '/^## agentry-ripgrep$/,/^## agentry-browser$/{/^## agentry-browser$/!d}' NOTICE ;;
 	syntax) printf '\nif then\n' >>scripts/pin.sh ;;
 	shellcheck) printf '\necho $undefined_but_unquoted\n' >>scripts/pin.sh ;;
 	workflow) printf 'jobs: [\n' >>.github/workflows/ci.yaml ;;

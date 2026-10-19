@@ -126,13 +126,46 @@ naming them — see each upstream repository.
 | `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
 | `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
+| `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
+| `agentry-python-slim` | `python:3.12-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
+| `agentry-ubuntu` | `ubuntu:noble` | see upstream (Ubuntu 24.04 packages, each under its own licence) |
+| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.3` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 
 "See upstream" means this repository has not audited the full dependency licence
 set of that image, and does not claim to. Mirroring preserves whatever terms the
 publisher shipped under; it does not relicense anything.
+
+## Source of the GPL and LGPL packages
+
+The mirrored images, and the images built on them (`agentry-codex`,
+`agentry-hostlink`, `agentry-files`, `agentry-unsafe-kali` and
+`agentry-browser`), carry Debian, Ubuntu, Kali and Alpine packages, many under
+the GNU GPL and LGPL. The packages in them are the distribution's own,
+unchanged, and each distribution publishes the corresponding source of its
+packages. For the exact version in an image, the package's version is in its
+package database (`/var/lib/dpkg/status` on Debian, Ubuntu and Kali,
+`/lib/apk/db/installed` on Alpine) and its licence in
+`/usr/share/doc/<package>/copyright` (Debian, Ubuntu, Kali).
+
+- Debian (`agentry-python-slim`, trixie; `agentry-node-bookworm`, bookworm):
+  https://sources.debian.org/ for browsing, https://deb.debian.org/debian/pool/
+  for the source archives, and https://snapshot.debian.org/ for a version
+  that is no longer in the archive.
+- Ubuntu (`agentry-ubuntu`, noble; `agentry-browser`): the source package
+  pages at `https://launchpad.net/ubuntu/+source/<package>`, and the archive's
+  source files under https://archive.ubuntu.com/ubuntu/pool/.
+- Kali (`agentry-kali-rolling`, `agentry-unsafe-kali`): the source files in
+  the package pool, http://http.kali.org/kali/pool/main/ (and `non-free` and
+  `contrib` beside it).
+- Alpine (the `agentry-*alpine*` images, `agentry-codex`, `agentry-hostlink`,
+  `agentry-files`): the package recipes (`APKBUILD`) and patches in
+  https://github.com/alpinelinux/aports at the branch named for the
+  release in the image's `/etc/alpine-release`, for example `3.22-stable`;
+  each recipe names the upstream source archive it builds.
 
 ## Not covered by this file
 
@@ -199,3 +232,67 @@ their own package licences. Nothing is built from source. What we add is
 ours, under MIT: the package record under /etc/agentry/hostlink/ and the
 hostlink user. OpenSSH is a project of OpenBSD; nothing built here is an
 OpenBSD or OpenSSH product.
+
+## agentry-ripgrep
+
+    Upstream:   https://github.com/BurntSushi/ripgrep
+    Commit:     e89fff89ac9af12e8d4ce9d5fd07beb408ca730f  (tag 15.2.0)
+    Licence:    Unlicense OR MIT
+    Our image:  agentry-ripgrep
+    Context:    build/ripgrep/
+
+ripgrep, by Andrew Gallant and its contributors, is built from the pinned
+upstream commit with its default features (no PCRE2) as a static binary, in an
+image that holds only the binary (`/rg`) and licence files. It is dual-licensed
+under the Unlicense or the MIT licence, at your option; `COPYING`,
+`LICENSE-MIT` and `UNLICENSE` are in the image under `/licenses/ripgrep/`.
+The Rust crates linked into the binary keep their own licences (MIT,
+Apache-2.0, Unlicense, and one `(Apache-2.0 OR MIT) AND BSD-3-Clause`): the
+licence and notice files of each are copied under `/licenses/crates/`,
+`/licenses/crates/crates.tsv` lists every crate with its version and declared
+licence, and `/licenses/crates/no-licence-file.tsv` names any crate that
+ships no licence file. The source is not modified.
+
+## agentry-browser
+
+    Base:       ubuntu:noble, by digest (images.tsv, agentry-ubuntu)
+    Context:    build/agentry-browser/
+    Our image:  agentry-browser
+
+The browser server image, for a QuickAgent that declares a browser. What is in
+it, and under which terms:
+
+- **Ubuntu 24.04 (noble)** and the system libraries Playwright's
+  `install-deps chromium` installs from Ubuntu's archive, unchanged, each under
+  its own licence in `/usr/share/doc/<package>/copyright`, many of them GPL,
+  LGPL or MPL. Their names and versions are recorded in
+  `/etc/agentry/browser/packages`. Their source is in Ubuntu's archive (see
+  "Source of the GPL and LGPL packages").
+- **Node.js** 24, the one file `/usr/local/bin/node`, taken from the
+  `node:24-bookworm-slim` mirror: MIT, with the licences of the components it
+  bundles; Node's `LICENSE` is at
+  `/usr/share/licenses/agentry-browser/node/LICENSE`.
+- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** (with `playwright`),
+  copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
+  without change, in `/app`. Each package's `LICENSE` is under
+  `/usr/share/licenses/agentry-browser/`, and playwright-core's `NOTICE` and
+  `ThirdPartyNotices.txt` (the notices of its bundled third-party code) are in
+  `/usr/share/licenses/agentry-browser/playwright-core/`. Their npm
+  dependencies are installed with the package, each with the licence it
+  declares in `/app/node_modules/<package>/`.
+- **Chrome for Testing** 155.0.8059.12, Google LLC's build of Chrome for
+  automation and testing, downloaded unchanged from Google's Chrome for
+  Testing storage (`https://storage.googleapis.com/chrome-for-testing-public`)
+  and held to the SHA-256 in `build/agentry-browser/source.env`, in
+  `/ms-playwright`. Chrome is made possible by the Chromium open source
+  project and other open source software; their licences are listed in the
+  browser itself (`chrome://credits`), and Google's terms for it are at
+  `chrome://terms`. Its `ABOUT` file, which says so, is at
+  `/usr/share/licenses/agentry-browser/chrome-for-testing/ABOUT`. The build
+  adds one file, the Chrome policy at
+  `/etc/opt/chrome_for_testing/policies/managed/agentry.json`. "Chrome" and
+  "Google Chrome" are trademarks of Google LLC, used only to identify the
+  component; nothing built here is a Google product.
+
+What we add is ours, under MIT: the policy, the package and build record under
+`/etc/agentry/browser/`, and the browser user.
