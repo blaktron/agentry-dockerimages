@@ -41,13 +41,16 @@
 #     no longer refuses PCRE2 in the dependency tree, or its fixture tree is
 #     missing (build/ripgrep).
 #   - the browser image's source.env does not pin the server, its Playwright,
-#     a Chrome for Testing revision and version from Google's bucket and a
-#     SHA-256 for each architecture; package.json and package-lock.json do
-#     not pin that same server and Playwright with sha512 integrity; the
-#     policy does not turn ECH, QUIC and DNS-over-HTTPS off; the Dockerfile
-#     does not install with --ignore-scripts, fetch with fetch.sh, install
-#     the policy, or run as uid 10001 in /out-browser; or fetch.sh does not
-#     check the SHA-256 and browsers.json (build/agentry-browser).
+#     a Debian chromium version, a snapshot.debian.org timestamp and a
+#     package SHA-256 for each architecture; package.json and
+#     package-lock.json do not pin that same server and Playwright with
+#     sha512 integrity; the policy does not turn ECH, QUIC and DNS-over-HTTPS
+#     off; the Dockerfile does not install with --ignore-scripts, install
+#     Chromium with install.sh, point the server at it, install the policy
+#     where Chromium reads it, or run as uid 10001 in /out-browser; install.sh
+#     does not use the snapshot or check the SHA-256 and browsers.json; or the
+#     context names Google's Chrome for Testing, its download, Playwright's
+#     browser download or a Widevine CDM (build/agentry-browser).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
@@ -141,8 +144,10 @@
 #       read-only root, uid 10001, a tmpfs home and /tmp, an output folder bound
 #       read-write. It fails unless the working directory is /out-browser,
 #       the record names source.env's server, Playwright and this
-#       architecture's browser and SHA-256, the browser is the only build in
-#       /ms-playwright, no file is setuid or setgid, and
+#       architecture's Chromium package, SHA-256 and snapshot, the browser
+#       says it is that Chromium, no Widevine CDM, Chrome for Testing build
+#       or Google Chrome file is anywhere in the image, no file is setuid or
+#       setgid, and
 #       build/agentry-browser/check/probe.mjs, driving the image's
 #       @playwright/mcp over stdio, renders the fixture page, writes a
 #       screenshot and a PDF to the output folder and refuses a name outside
@@ -1522,15 +1527,19 @@ hostlinkImage() {
 BROWSER_CTX=build/agentry-browser
 
 # checkBrowser holds the browser image's context to its contract: source.env
-# pins the server, the Playwright it brings, the Chrome for Testing revision
-# and version and a SHA-256 for each architecture's archive from Google's bucket;
-# package.json and package-lock.json pin that same server and Playwright,
-# with integrity hashes, and are installed with --ignore-scripts; fetch.sh
-# holds the archive to its SHA-256 and browsers.json to source.env; the
-# policy turns ECH and QUIC off; and the image runs as uid 10001 in
-# /out-browser.
+# pins the server, the Playwright it brings, Debian's chromium package
+# (version, snapshot.debian.org timestamp and a SHA-256 for each
+# architecture's package); package.json and package-lock.json pin that same
+# server and Playwright, with integrity hashes, and are installed with
+# --ignore-scripts; install.sh installs from the snapshot and holds the
+# package to its SHA-256 and browsers.json to source.env; the Dockerfile
+# points the server at that Chromium and puts the policy where it reads it;
+# the policy turns ECH and QUIC off; the image runs as uid 10001 in
+# /out-browser; and nothing in the context names Google's Chrome for Testing,
+# its storage, Playwright's own browser download or a Widevine CDM, the
+# proprietary builds this image must never carry.
 checkBrowser() {
-	local bad=0
+	local bad=0 f
 	(
 		# shellcheck source=/dev/null
 		. "$BROWSER_CTX/source.env"
@@ -1543,16 +1552,16 @@ checkBrowser() {
 			echo "$BROWSER_CTX/source.env: PLAYWRIGHT_VERSION is not a version: ${PLAYWRIGHT_VERSION:-}"
 			b=1
 		}
-		[[ "${CHROMIUM_REVISION:-}" =~ ^[0-9]+$ ]] || {
-			echo "$BROWSER_CTX/source.env: CHROMIUM_REVISION is not a revision: ${CHROMIUM_REVISION:-}"
-			b=1
-		}
 		[[ "${CHROMIUM_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-			echo "$BROWSER_CTX/source.env: CHROMIUM_VERSION is not a Chrome version: ${CHROMIUM_VERSION:-}"
+			echo "$BROWSER_CTX/source.env: CHROMIUM_VERSION is not a Chromium version: ${CHROMIUM_VERSION:-}"
 			b=1
 		}
-		[ "${CHROMIUM_URL:-}" = https://storage.googleapis.com/chrome-for-testing-public ] || {
-			echo "$BROWSER_CTX/source.env: CHROMIUM_URL is not Google's Chrome for Testing bucket: ${CHROMIUM_URL:-}"
+		[[ "${CHROMIUM_DEB_VERSION:-}" =~ ^[0-9.]+-[0-9A-Za-z.+~]+$ && "${CHROMIUM_DEB_VERSION%%-*}" = "${CHROMIUM_VERSION:-}" ]] || {
+			echo "$BROWSER_CTX/source.env: CHROMIUM_DEB_VERSION is not a Debian package of Chromium ${CHROMIUM_VERSION:-}: ${CHROMIUM_DEB_VERSION:-}"
+			b=1
+		}
+		[[ "${DEBIAN_SNAPSHOT:-}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || {
+			echo "$BROWSER_CTX/source.env: DEBIAN_SNAPSHOT is not a snapshot.debian.org timestamp: ${DEBIAN_SNAPSHOT:-}"
 			b=1
 		}
 		for key in CHROMIUM_SHA256_AMD64 CHROMIUM_SHA256_ARM64; do
@@ -1607,23 +1616,35 @@ PY
 		bad=1
 	fi
 	# shellcheck disable=SC2016 # the Dockerfile's own $TARGETARCH, matched literally
-	if ! grep -q '^RUN TARGETARCH="\$TARGETARCH" sh /agentry/fetch.sh ' "$BROWSER_CTX/Dockerfile"; then
-		echo "$BROWSER_CTX/Dockerfile: does not fetch the browser with fetch.sh"
+	if ! grep -q '^RUN TARGETARCH="\$TARGETARCH" sh /agentry/install.sh ' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not install the browser with install.sh"
 		bad=1
 	fi
-	if ! grep -qx 'COPY policy.json /etc/opt/chrome_for_testing/policies/managed/agentry.json' "$BROWSER_CTX/Dockerfile"; then
-		echo "$BROWSER_CTX/Dockerfile: does not install policy.json where Chrome for Testing reads it"
+	if ! grep -q '^ENV PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/lib/chromium/chromium ' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not point the server at /usr/lib/chromium/chromium"
+		bad=1
+	fi
+	if ! grep -qx 'COPY policy.json /etc/chromium/policies/managed/agentry.json' "$BROWSER_CTX/Dockerfile"; then
+		echo "$BROWSER_CTX/Dockerfile: does not install policy.json where Chromium reads it"
 		bad=1
 	fi
 	if ! grep -qx 'USER 10001:10001' "$BROWSER_CTX/Dockerfile" || ! grep -qx 'WORKDIR /out-browser' "$BROWSER_CTX/Dockerfile"; then
 		echo "$BROWSER_CTX/Dockerfile: does not run as uid 10001 in /out-browser"
 		bad=1
 	fi
-	if ! grep -q '| sha256sum -c - || refuse ' "$BROWSER_CTX/fetch.sh" ||
-		! grep -q 'refuse "browsers.json names chromium' "$BROWSER_CTX/fetch.sh"; then
-		echo "$BROWSER_CTX/fetch.sh: does not hold the archive to its SHA-256 and browsers.json to source.env"
+	# shellcheck disable=SC2016 # install.sh's own variables, matched literally
+	if ! grep -qF '[ "$got" = "$sum" ] ||' "$BROWSER_CTX/install.sh" ||
+		! grep -qF 'refuse "Playwright $PLAYWRIGHT_VERSION was made for' "$BROWSER_CTX/install.sh" ||
+		! grep -qF 'URIs: http://snapshot.debian.org/archive/debian-security/$DEBIAN_SNAPSHOT' "$BROWSER_CTX/install.sh"; then
+		echo "$BROWSER_CTX/install.sh: does not install from the snapshot, hold the package to its SHA-256 and browsers.json to source.env"
 		bad=1
 	fi
+	for f in Dockerfile install.sh source.env bases.env package.json package-lock.json policy.json; do
+		if grep -En 'chrome-for-testing|chrome_for_testing|storage\.googleapis\.com|cdn\.playwright\.dev|playwright\.download|WidevineCdm|widevinecdm|ms-playwright|PLAYWRIGHT_BROWSERS_PATH|google-chrome|cli\.js install' "$BROWSER_CTX/$f"; then
+			echo "$BROWSER_CTX/$f: names a proprietary browser build or Playwright's browser download (above)"
+			bad=1
+		fi
+	done
 	return "$bad"
 }
 
@@ -1633,9 +1654,10 @@ PY
 # folder bound read-write).
 # It fails unless the user is uid 10001 and the working directory
 # /out-browser, the record names source.env's server, Playwright and this
-# architecture's browser and SHA-256, the browser is at the path the image's
-# Playwright expects and the headless shell is absent, no file is setuid or
-# setgid, and check/probe.mjs, driving the image's @playwright/mcp over stdio,
+# architecture's Chromium package, SHA-256 and snapshot, the browser the
+# server is pointed at says it is that Chromium, no Widevine CDM, Chrome for
+# Testing build or Google Chrome file is anywhere in the image, no file is
+# setuid or setgid, and check/probe.mjs, driving the image's @playwright/mcp over stdio,
 # renders the fixture page, writes a screenshot and a PDF there and nowhere
 # else, types a secret by name with its value masked, and sends a ClientHello
 # with no ECH; then the probe's control, with the policy folder hidden, must
@@ -1684,10 +1706,10 @@ browserImage() {
 		bad=1
 	fi
 
-	local sum chromeDir
+	local sum
 	case "$arch" in
-	amd64) sum="$CHROMIUM_SHA256_AMD64" chromeDir=chrome-linux64 ;;
-	arm64) sum="$CHROMIUM_SHA256_ARM64" chromeDir=chrome-linux-arm64 ;;
+	amd64) sum="$CHROMIUM_SHA256_AMD64" ;;
+	arm64) sum="$CHROMIUM_SHA256_ARM64" ;;
 	*)
 		echo "FAIL no browser build for $arch"
 		return 1
@@ -1696,34 +1718,53 @@ browserImage() {
 	echo "record:"
 	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/browser/record | tee "$dir/record" | sed 's/^/  /'
 	if grep -qx "mcp $MCP_VERSION" "$dir/record" && grep -qx "playwright $PLAYWRIGHT_VERSION" "$dir/record" &&
-		grep -qx "chromium $CHROMIUM_REVISION $CHROMIUM_VERSION $arch $sum" "$dir/record" &&
+		grep -qxF "chromium $CHROMIUM_VERSION $CHROMIUM_DEB_VERSION $arch $sum $DEBIAN_SNAPSHOT" "$dir/record" &&
 		grep -Eqx 'node v(2[0-9]|[3-9][0-9])\.[0-9]+\.[0-9]+' "$dir/record"; then
-		echo "ok   the record names source.env's server, Playwright and this architecture's browser and SHA-256"
+		echo "ok   the record names source.env's server, Playwright and this architecture's Chromium package, SHA-256 and snapshot"
 	else
 		echo "FAIL the record does not match source.env"
 		bad=1
 	fi
 	echo "  $("${run[@]}" --entrypoint /usr/bin/wc "$ref" -l /etc/agentry/browser/packages | cut -d' ' -f1) Debian packages recorded"
 
-	# Where the image's own Playwright looks, and nothing else under
-	# /ms-playwright: no headless shell, no other browser.
-	if out=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'ls /ms-playwright; test -x /ms-playwright/chromium-'"$CHROMIUM_REVISION"'/'"$chromeDir"'/chrome && echo executable') &&
-		[ "$out" = "chromium-$CHROMIUM_REVISION
-executable" ]; then
-		echo "ok   the browser is chromium-$CHROMIUM_REVISION/$chromeDir/chrome, the only build in /ms-playwright"
+	# The executable the server is pointed at, and what it says it is: an
+	# open-source Chromium build, not Google Chrome or Chrome for Testing.
+	out=$("$runtime" image inspect "$ref" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep '^PLAYWRIGHT_MCP_EXECUTABLE_PATH=' || true)
+	if [ "$out" = PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/lib/chromium/chromium ] &&
+		out=$("${run[@]}" --entrypoint /usr/lib/chromium/chromium "$ref" --version) &&
+		[[ "$out" =~ ^Chromium\ ${CHROMIUM_VERSION//./\\.}( |$) ]]; then
+		echo "ok   the server is pointed at /usr/lib/chromium/chromium, which says $out"
 	else
-		echo "FAIL /ms-playwright holds: $out"
+		echo "FAIL the browser the server is pointed at: $out"
 		bad=1
 	fi
 
 	local lic
-	lic="node/LICENSE @playwright/mcp/LICENSE playwright/LICENSE playwright-core/LICENSE playwright-core/NOTICE playwright-core/ThirdPartyNotices.txt chrome-for-testing/ABOUT"
+	lic="node/LICENSE @playwright/mcp/LICENSE playwright/LICENSE playwright-core/LICENSE playwright-core/NOTICE playwright-core/ThirdPartyNotices.txt chromium/copyright"
 	# shellcheck disable=SC2016 # $f expands in the container's shell
 	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'cd /usr/share/licenses/agentry-browser && for f in '"$lic"'; do test -s "$f" || { echo "missing $f"; exit 1; }; done'; then
 		echo "ok   the licences are in /usr/share/licenses/agentry-browser"
 	else
 		echo "FAIL a licence is missing from /usr/share/licenses/agentry-browser"
 		bad=1
+	fi
+
+	# Nothing proprietary anywhere in the image: no Widevine CDM, no Chrome
+	# for Testing build or archive, no Google Chrome, no Playwright browser
+	# folder. Run as root with DAC_READ_SEARCH alone, like the scan below,
+	# and a scan that could not finish fails.
+	local found f
+	if ! found=$("${run[@]}" --user 0:0 --cap-add DAC_READ_SEARCH --entrypoint /usr/bin/find "$ref" / -xdev \
+		\( -iname '*widevine*' -o -iname '*chrome_for_testing*' -o -iname '*chrome-for-testing*' \
+		-o -iname 'google-chrome*' -o -name 'chrome-linux*' -o -path /opt/google -o -path /ms-playwright \) -print); then
+		echo "FAIL the scan for proprietary browser files did not finish"
+		bad=1
+	elif [ -n "$found" ]; then
+		echo "FAIL a proprietary browser file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$found"
+		bad=1
+	else
+		echo "ok   no Widevine CDM, Chrome for Testing build or Google Chrome file"
 	fi
 
 	# The scan runs as root with DAC_READ_SEARCH alone, so no directory is
@@ -1746,7 +1787,7 @@ executable" ]; then
 		echo "FAIL the probe"
 		bad=1
 	fi
-	if ! "${probe[@]}" --tmpfs /etc/opt/chrome_for_testing/policies/managed:size=1m "$ref" /check/probe.mjs control; then
+	if ! "${probe[@]}" --tmpfs /etc/chromium/policies/managed:size=1m "$ref" /check/probe.mjs control; then
 		echo "FAIL the probe's control"
 		bad=1
 	fi
@@ -1806,7 +1847,10 @@ browserlock checkBrowser
 browserech checkBrowser
 browseruser checkBrowser
 browserscripts checkBrowser
-browserfetch checkBrowser
+browserinstall checkBrowser
+browserexec checkBrowser
+browserpolicy checkBrowser
+browsercft checkBrowser
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -1850,7 +1894,10 @@ breakCase() {
 	browserech) sed -i 's/"EncryptedClientHelloEnabled": false/"EncryptedClientHelloEnabled": true/' build/agentry-browser/policy.json ;;
 	browseruser) sed -i '/^USER 10001:10001$/d' build/agentry-browser/Dockerfile ;;
 	browserscripts) sed -i 's/^RUN npm ci --ignore-scripts /RUN npm ci /' build/agentry-browser/Dockerfile ;;
-	browserfetch) sed -i 's/ | sha256sum -c - || refuse / | true || refuse /' build/agentry-browser/fetch.sh ;;
+	browserinstall) sed -i 's/\[ "\$got" = "\$sum" \] ||/: ||/' build/agentry-browser/install.sh ;;
+	browserexec) sed -i 's|^ENV PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/lib/chromium/chromium |ENV |' build/agentry-browser/Dockerfile ;;
+	browserpolicy) sed -i 's|/etc/chromium/policies/managed/agentry.json|/etc/opt/chrome/policies/managed/agentry.json|' build/agentry-browser/Dockerfile ;;
+	browsercft) printf 'CHROMIUM_URL=https://storage.googleapis.com/chrome-for-testing-public\n' >>build/agentry-browser/source.env ;;
 	esac
 }
 

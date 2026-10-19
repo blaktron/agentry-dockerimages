@@ -48,7 +48,7 @@ list. Built images are listed with what they are built from.
 | `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.22` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
 | `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
-| `agentry-browser` | `ubuntu:noble` + `@playwright/mcp` + Chrome for Testing (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
+| `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
 | `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | Docker Agent built from a pinned commit, published separately from the mirror so the two can be compared. |
 
 Mirrors used only as bases when building:
@@ -61,7 +61,7 @@ Mirrors used only as bases when building:
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
-| `agentry-ubuntu` | `ubuntu:noble` | `build/agentry-browser/`: base. |
+| `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/`: base. |
 | `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. |
 
 Packages that the publishing workflows create in this public repository are
@@ -359,40 +359,50 @@ Target hosts are described at
 ### agentry-browser
 
 Microsoft's [`@playwright/mcp`](https://github.com/microsoft/playwright-mcp)
-driving a headless Chrome for Testing, on the `ubuntu:noble` mirror. The runner
-starts it as a server in the run's gateway and passes the settings that hold a
-run (proxy, tool filter, Chromium sandbox, output folder, secrets file).
+driving a headless Chromium, Debian's `chromium` package, on the
+`debian:trixie-slim` mirror. The runner starts it as a server in the run's
+gateway and passes the settings that hold a run (proxy, tool filter, Chromium
+sandbox, output folder, secrets file).
 
 - `@playwright/mcp` is installed in `/app` with `npm ci --ignore-scripts
   --omit=dev` on the `node:24-bookworm-slim` mirror, held by
   `package-lock.json` (exact versions, sha512 integrity). That mirror also
   supplies `/usr/local/bin/node`.
-- Chrome for Testing in `/ms-playwright` comes from Google's bucket, held to a
-  SHA-256 per architecture in `source.env`; `fetch.sh` refuses unless the
-  lockfile's `playwright-core` names the same revision and version in its
-  `browsers.json`. Each SHA-256 was taken from a download that matched the MD5
-  Google stores for the object (its `x-goog-hash` header). The image holds the
-  full Chrome build only, because the headless shell ignores enterprise
-  policies.
-- `policy.json` is installed as Chrome's managed policy. It sets
+- Chromium is Debian's build from the Chromium project's open-source code, with
+  no Widevine CDM and no other proprietary component. `install.sh` installs it
+  from [snapshot.debian.org](https://snapshot.debian.org/) at the timestamp in
+  `source.env`, so every Debian package in the image (its libraries and fonts
+  too) is the one that snapshot held. apt checks each index against Debian's
+  archive signature and each package against the index, and `install.sh`
+  refuses unless the chromium package has `source.env`'s version and, for the
+  architecture, its SHA-256, and unless the lockfile's `playwright-core` was
+  made for that Chromium major version or the next one (its `browsers.json`).
+  The server is pointed at `/usr/lib/chromium/chromium` by
+  `PLAYWRIGHT_MCP_EXECUTABLE_PATH`. Playwright's own browser download is
+  Google's Chrome for Testing, which this image must not carry; the checks fail
+  if a Chrome for Testing build, a Widevine CDM or a Google Chrome file appears
+  in the context or the image.
+- `policy.json` is installed as Chromium's managed policy, in
+  `/etc/chromium/policies/managed/`. It sets
   `EncryptedClientHelloEnabled: false` (no launch flag can; Chromium otherwise
   sends a GREASE ECH extension, which the run's browse proxy refuses) and turns
   off QUIC, DNS-over-HTTPS, WebRTC UDP outside the proxy, component updates and
-  Google's background services.
+  the browser's background services.
 
 It runs as uid 10001 (`browser`) in `/out-browser`, where the runner binds the
-run's `reports/browser/`, with no setuid or setgid file. System library
-versions are recorded in `/etc/agentry/browser/packages`, the server and browser
-versions in `/etc/agentry/browser/record`, licences in
-`/usr/share/licenses/agentry-browser`.
+run's `reports/browser/`, with no setuid or setgid file (Debian's setuid
+`chromium-sandbox` is not installed). Debian package versions are recorded in
+`/etc/agentry/browser/packages`, the server and browser versions in
+`/etc/agentry/browser/record`, licences in `/usr/share/licenses/agentry-browser`.
 
-To bump: set the new version in `package.json`, run `npm install
---package-lock-only --ignore-scripts` in `build/agentry-browser/`, copy the
-Chromium revision and version from the new `playwright-core`'s `browsers.json`
-into `source.env` with `MCP_VERSION` and `PLAYWRIGHT_VERSION`, download each
-architecture's archive from
-`https://storage.googleapis.com/chrome-for-testing-public/<version>/`, check it
-against Google's MD5 and record its SHA-256.
+To bump: set the new version in `package.json` and run `npm install
+--package-lock-only --ignore-scripts` in `build/agentry-browser/`; copy
+`MCP_VERSION` and `PLAYWRIGHT_VERSION` into `source.env`. Then pick a
+snapshot.debian.org timestamp whose `trixie-security` (or `trixie`) holds a
+`chromium` for the major version the new `browsers.json` names, or the one
+before it, and set `DEBIAN_SNAPSHOT`, `CHROMIUM_VERSION`,
+`CHROMIUM_DEB_VERSION` and the SHA-256 of the package in that snapshot's
+`binary-amd64` and `binary-arm64` `Packages` indexes.
 
 ### agentry-docker-agent-src
 
