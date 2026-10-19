@@ -25,9 +25,13 @@
 #      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
 #      binary is still CGO with external linking, checked to be static, and
 #      built with -tags no_audio and the same version ldflags.
-#   5. Go 1.27.2, not upstream's 1.27.0 (upstream.Dockerfile's GO_VERSION): the
-#      standard library's net/http and HTTP/2 advisories of 2026-10-08 are
-#      fixed in 1.27.2. The module's own go line is upstream's.
+#   5. Two dependencies are raised before the build, each to the first release
+#      that fixes the advisories govulncheck reports against upstream's pins:
+#      golang.org/x/net v0.59.0 to v0.61.0 (GO-2026-6603, -6610, -6611, -6612,
+#      -6617: its HTTP/2 client, whose peer is the model provider through the
+#      runner's proxy), and otel's otlptracegrpc exporter v1.40.0 to v1.45.0.
+#      `go get` raises only what those modules require; the build records the
+#      result, and `go version -m /docker-agent` shows it.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -50,6 +54,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+	go get golang.org/x/net@v0.61.0 \
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 && \
+	go mod verify
 ARG GIT_TAG
 ARG GIT_COMMIT
 ENV CGO_ENABLED=1

@@ -14,7 +14,7 @@ terms are restated here.
 ### Docker Agent
 
     Upstream:   https://github.com/docker/docker-agent
-    Commit:     1a0e7ffbcbad4b2cbdd690f48689e87fb0c69599  (tag v1.128.0)
+    Commit:     5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2  (tag v1.150.0)
     Licence:    Apache-2.0
     Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
@@ -36,6 +36,11 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
 4. The cross-compilation stages (`tonistiigi/xx`, `crazymax/osxcross`, zig, and
    the darwin/windows paths) are dropped; this builds Linux only. The binary is
    still CGO with external linking and still asserted static.
+5. Two dependencies are raised before the build: `golang.org/x/net` from
+   v0.59.0 to v0.61.0 and otel's `otlptracegrpc` exporter from v1.40.0 to
+   v1.45.0, each the first release that fixes advisories reported against
+   upstream's pins. No source file is changed; `go.mod` and `go.sum` in the
+   build are, by `go get`.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
