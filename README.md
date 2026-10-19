@@ -23,8 +23,11 @@ What each image does inside a run is documented with the runner:
 | `.github/workflows/` | `ci` (checks), `images` (mirror and simple builds), and one publishing workflow per image that is built per architecture and signed. |
 | `NOTICE`, `LICENSE` | Licences, see the end of this file. |
 
-The Agentry server's own images (Postgres, MinIO, Redis, the edge,
-authentik, OpenSearch, `secureagentryd`) are not here. Neither are the runner
+The Agentry server's own images (Postgres, Redis, the edge, authentik,
+OpenSearch, `secureagentryd`) are not here, with one exception: the object
+store of the headless compose stack, `agentry-minio`, whose publisher serves
+only a `latest` tag and does not promise an older digest stays pullable, so
+the compose file pins our copy instead. Neither are the runner
 image and the per-release exec and MCP-server images: the CLI builds those
 locally on the machine that runs them.
 
@@ -50,6 +53,7 @@ list. Built images are listed with what they are built from.
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
 | `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | Docker Agent built from a pinned commit, published separately from the mirror so the two can be compared. |
+| `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
 
