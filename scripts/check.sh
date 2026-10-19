@@ -110,6 +110,14 @@
 #       its SHA-256 is the release record's, and it verifies again against
 #       OpenAI's signature with build/agentry-codex/verify.sh. PLATFORM asks
 #       for, and checks, one architecture.
+#   scripts/check.sh --docker-agent-image <ref>
+#       run a built agentry-docker-agent-src hardened, as the runner runs a
+#       harness (no network, every capability dropped, no new privileges, a
+#       read-only root, the image's own user), and fail unless the user is not
+#       root, `docker-agent version` names source.env's tag and commit,
+#       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
+#       the binary is static, and it links golang.org/x/net v0.60.0 or later.
+#       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
 #       run a built agentry-hostlink hardened, as the runner runs a host link
 #       (every capability dropped, no new privileges, a read-only root, the
@@ -1180,6 +1188,98 @@ codexImage() {
 	return "$bad"
 }
 
+DOCKER_AGENT_CTX=build/docker-agent
+
+# dockerAgentImage runs a built agentry-docker-agent-src hardened (no network,
+# every capability dropped, no new privileges, a read-only root, the image's own
+# user) and fails unless the user is not root, `docker-agent version` names
+# source.env's tag and commit, DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file
+# is setuid or setgid, the binary is static, and the binary links
+# golang.org/x/net v0.60.0 or later. PLATFORM asks for, and checks, one
+# architecture.
+dockerAgentImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id bad=0
+	# shellcheck source=/dev/null
+	. "$DOCKER_AGENT_CTX/source.env"
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	local run=("$runtime" run --rm --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /tmp:mode=1777 --tmpfs /data:mode=1777 --tmpfs /work:mode=1777
+		--pids-limit 256 --memory 1g)
+	if [ -n "${PLATFORM:-}" ]; then
+		run+=(--platform "$PLATFORM")
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --entrypoint /bin/uname "$ref" -m)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+	id=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u)
+	if [ "$id" = 0 ] || [ -z "$id" ]; then
+		echo "FAIL the image runs as uid '${id}', not a user of its own"
+		bad=1
+	else
+		echo "ok   runs as uid $id"
+	fi
+	got=$("${run[@]}" "$ref" version 2>&1) || got="(failed) $got"
+	if grep -qF "$UPSTREAM_TAG" <<<"$got" && grep -qF "$UPSTREAM_COMMIT" <<<"$got"; then
+		echo "ok   docker-agent version names $UPSTREAM_TAG and $UPSTREAM_COMMIT, with no network and a read-only root"
+	else
+		echo "FAIL docker-agent version: $got (want $UPSTREAM_TAG and $UPSTREAM_COMMIT)"
+		bad=1
+	fi
+	if [ "$("$runtime" image inspect "$ref" --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^DOCKER_AGENT_DISABLE_DESKTOP_PROXY=//p')" = 1 ]; then
+		echo "ok   DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1"
+	else
+		echo "FAIL DOCKER_AGENT_DISABLE_DESKTOP_PROXY is not 1"
+		bad=1
+	fi
+	local suid f
+	if ! suid=$("${run[@]}" --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+	"${run[@]}" --entrypoint /bin/cat "$ref" /docker-agent >"$out/docker-agent"
+	if file "$out/docker-agent" | grep -q 'static'; then
+		echo "ok   the binary is static"
+	else
+		echo "FAIL the binary is not static: $(file -b "$out/docker-agent")"
+		bad=1
+	fi
+	# The module versions the binary records; go is on the runner, else our
+	# golang mirror reads them.
+	if command -v go >/dev/null; then
+		go version -m "$out/docker-agent" >"$out/mods"
+	else
+		"$runtime" run --rm --network none -v "$out:/b:ro" "${REGISTRY:-ghcr.io/blaktron}/agentry-golang-alpine:$(golangTag)" go version -m /b/docker-agent >"$out/mods"
+	fi
+	local xnet
+	xnet=$(awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}' "$out/mods")
+	if [ -n "$xnet" ] && [ "$(printf '%s\nv0.60.0\n' "$xnet" | sort -V | head -1)" = v0.60.0 ]; then
+		echo "ok   golang.org/x/net $xnet"
+	else
+		echo "FAIL golang.org/x/net is ${xnet:-absent}, want v0.60.0 or later"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# golangTag is the tag images.tsv mirrors agentry-golang-alpine under.
+golangTag() {
+	awk -F'\t' '$1 == "agentry-golang-alpine" {sub(/^[^:]*:/, "", $2); print $2; exit}' images.tsv
+}
+
 HOSTLINK_CTX=build/agentry-hostlink
 
 # hostlinkPackages prints the Dockerfile's PACKAGES, one a line.
@@ -1988,6 +2088,13 @@ case "${1:-}" in
 	}
 	hostlinkImage "$2"
 	;;
+--docker-agent-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --docker-agent-image <ref>" >&2
+		exit 2
+	}
+	dockerAgentImage "$2"
+	;;
 --browser-image)
 	[ $# -eq 2 ] || {
 		echo "usage: scripts/check.sh --browser-image <ref>" >&2
@@ -2011,7 +2118,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --docker-agent-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac

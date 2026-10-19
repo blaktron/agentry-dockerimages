@@ -39,7 +39,7 @@ list. Built images are listed with what they are built from.
 | Image | Source | Kind | What it is for |
 |---|---|---|---|
 | `agentry-mcp-gateway` | `docker/mcp-gateway` | mirror | The MCP gateway, started once per run: the run's tool plane. |
-| `agentry-docker-agent` | `docker/docker-agent` | mirror | The default harness: the agent program that talks to the model. |
+| `agentry-docker-agent` | `docker/docker-agent` | mirror | The vendor's harness image, byte for byte, the default before the build from source; kept for comparison and for policies that pin it. |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
 | `agentry-alpine` | `alpine:3.22` | mirror | The runner image's runtime base, and the base of the files and host link images. |
 | `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
@@ -52,7 +52,7 @@ list. Built images are listed with what they are built from.
 | `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | Docker Agent built from a pinned commit, published separately from the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -414,14 +414,21 @@ at that snapshot.
 
 ### agentry-docker-agent-src
 
-`build/docker-agent/` builds Docker Agent from the commit in `source.env`.
-`upstream.Dockerfile` is the vendor's Dockerfile at that commit, for
-comparison. Ours differs in four ways: every base comes from the digest-pinned
-mirrors; the `docker-mcp` plugin is copied from a pinned digest instead of the
-floating `docker/mcp-gateway:v2`; `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is
-set; and it builds Linux only, without upstream's cross-compilation stages,
-with the binary checked to be statically linked. It is built for the build
-host's platform only, and needs several GB of free disk.
+`build/docker-agent/` builds Docker Agent from the commit in `source.env`; it
+is the runner's default harness. `upstream.Dockerfile` is the vendor's
+Dockerfile at that commit, for comparison. Ours differs in five ways: every
+base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
+from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
+`DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
+upstream's cross-compilation stages, with the binary checked to be statically
+linked; and `golang.org/x/net` and otel's `otlptracegrpc` exporter are raised to
+the releases that fix the advisories reported against upstream's pins.
+
+The `docker-agent` workflow builds it natively for amd64 and arm64, runs each
+hardened (`scripts/check.sh --docker-agent-image`), joins the two into one tag
+(`<upstream version>-<UTC date>.<run number>`), signs that digest keyless and
+prints the `images.tsv` row. It needs several GB of free disk per
+architecture.
 
 ### agentry-typst
 
