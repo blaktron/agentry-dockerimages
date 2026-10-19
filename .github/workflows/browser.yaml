@@ -1,6 +1,6 @@
 # Build, check, sign and publish agentry-browser, the browser server image:
-# Microsoft's @playwright/mcp and the Chrome for Testing build of the
-# Playwright it pins, on our ubuntu:noble mirror, to ghcr.io/blaktron.
+# Microsoft's @playwright/mcp and Debian's Chromium, on our debian:trixie-slim
+# mirror, to ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -10,16 +10,18 @@
 # digest.
 #
 # The server comes from package-lock.json (npm ci --ignore-scripts) on our
-# node:24-bookworm-slim mirror, the browser from Google's Chrome for Testing
-# bucket held to source.env's SHA-256, the system libraries from Ubuntu's
-# archive through Playwright's install-deps. Those fetches happen here, once,
-# and never inside a person's run.
+# node:24-bookworm-slim mirror; Chromium, its libraries and the fonts from
+# snapshot.debian.org at source.env's timestamp, the chromium package held to
+# source.env's version and SHA-256. Those fetches happen here, once, and never
+# inside a person's run. The base mirrors (agentry-debian,
+# agentry-node-bookworm) must exist first: the images workflow mirrors the
+# named rows.
 #
 # Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
 # ubuntu-24.04-arm, and run hardened with no network (scripts/check.sh
-# --browser-image: the fixture page rendered, a screenshot and a PDF, a
-# secret typed by name and masked, no ECH in the ClientHello, and the
-# control) before it is pushed.
+# --browser-image: Debian's Chromium and no proprietary browser file, the
+# fixture page rendered, a screenshot and a PDF, a secret typed by name and
+# masked, no ECH in the ClientHello, and the control) before it is pushed.
 # Each build job hands the merge the digest it pushed, never a tag: the merge
 # joins those digests, holds the joined index to listing exactly them, checks
 # it by digest, and signs that same digest with cosign, keyless, as this
@@ -98,8 +100,8 @@ jobs:
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Longer than hostlink's 30: Ubuntu's archive for install-deps, a 190 MB
-    # browser archive and a browser check.
+    # Longer than hostlink's 30: Chromium and its libraries from the snapshot
+    # archive, which is slow, and a browser check.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -202,7 +204,7 @@ jobs:
           # shellcheck source=/dev/null
           . build/agentry-browser/source.env
           row=$(printf 'agentry-browser\tghcr.io/blaktron/agentry-browser:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the browser server image: @playwright/mcp $MCP_VERSION from its lockfile and Chrome for Testing $CHROMIUM_VERSION held to its SHA-256, with its Chrome policy (ECH and QUIC off), on our ubuntu:noble mirror, uid 10001, amd64 and arm64, signed keyless by the browser workflow (agentry-cli's browser server)")
+            "the browser server image: @playwright/mcp $MCP_VERSION from its lockfile and Debian's Chromium $CHROMIUM_DEB_VERSION (snapshot $DEBIAN_SNAPSHOT) held to its SHA-256, with its Chromium policy (ECH and QUIC off), on our debian:trixie-slim mirror, uid 10001, amd64 and arm64, signed keyless by the browser workflow (agentry-cli's browser server)")
           {
             echo "### agentry-browser:$IMAGE_TAG"
             echo
