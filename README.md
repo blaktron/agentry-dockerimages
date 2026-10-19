@@ -235,7 +235,9 @@ cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
 ```
 
 The `clamav-db` workflow publishes the ClamAV signature bundle
-`ghcr.io/blaktron/agentry-clamav-db` daily (07:17 UTC) and on dispatch. It
+`ghcr.io/blaktron/agentry-clamav-db` daily (07:17 UTC) and on dispatch, always
+from `main`: the scheduled run starts on the default branch and only dispatches
+the workflow on `main`, whose run publishes. It
 has no row in `images.tsv`, because a pin would hold every machine to one
 day's signatures; its trust is the signature. Verify it the same way, with
 `clamav-db.yaml` as the workflow.

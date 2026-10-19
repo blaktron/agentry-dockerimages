@@ -21,10 +21,13 @@
 # repository creates is), so the CLI pulls it with no credential; the run
 # proves that with an anonymous manifest fetch.
 #
-# Scheduled daily, and dispatched by hand from main only. A schedule runs on
-# the default branch, main. GitHub disables a public repository's schedules
-# after 60 days without activity; a bundle older than 7 days is in every
-# receipt, which is how that would be noticed.
+# Published from main only, daily and when dispatched by hand. GitHub starts
+# a schedule from the default branch, which is dev, and a run from dev cannot
+# sign as main, so the scheduled run does one thing: it dispatches this
+# workflow on main, and that run publishes (the job token may start a run by
+# dispatch, though not by a push). GitHub disables a public repository's
+# schedules after 60 days without activity; a bundle older than 7 days is in
+# every receipt, which is how that would be noticed.
 name: clamav-db
 
 on:
@@ -41,14 +44,26 @@ defaults:
   run:
     shell: bash
 
-concurrency:
-  group: clamav-db
-  cancel-in-progress: false
-
 jobs:
+  dispatch-on-main:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch this workflow on main, which publishes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run clamav-db.yaml --repo "${{ github.repository }}" --ref main
+
   publish:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: clamav-db
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
