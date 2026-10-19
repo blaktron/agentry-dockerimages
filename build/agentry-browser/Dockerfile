@@ -16,9 +16,10 @@
 #   /usr/lib/chromium/chromium
 #                        Debian's chromium package, built by Debian from the
 #                        Chromium project's source, at source.env's version
-#                        and SHA-256, from snapshot.debian.org at source.env's
-#                        timestamp (install.sh). It carries no Widevine CDM
-#                        and no other proprietary component. Playwright's
+#                        and SHA-256s, from snapshot.debian.org at
+#                        source.env's timestamp (install.sh). Debian's main
+#                        archive holds only free software; it carries no
+#                        Widevine CDM. Playwright's
 #                        own browser download is Google's Chrome for Testing,
 #                        which is not open source, so the image has none:
 #                        PLAYWRIGHT_MCP_EXECUTABLE_PATH points the server at
@@ -29,7 +30,8 @@
 #                        false is what lets the browse proxy's SNI check pass:
 #                        no launch flag stops Chromium's GREASE ECH. The rest
 #                        turns off QUIC, DNS-over-HTTPS, non-proxied WebRTC
-#                        UDP and the browser's background services
+#                        UDP, Cast discovery and the browser's background
+#                        services
 #   /etc/agentry/browser/record
 #                        one line each for the server, Playwright, Node and
 #                        the browser (version, Debian version, architecture,
@@ -43,9 +45,10 @@
 #                        licences of Chromium and the code it bundles (also
 #                        in the browser itself, chrome://credits)
 #
-# Every Debian package, Chromium's libraries and the fonts included, comes
-# from the one snapshot, so a rebuild of the same commit installs the same
-# versions; they are recorded in /etc/agentry/browser/packages. No file is
+# Every package install.sh installs, Chromium's libraries and the fonts
+# included, comes from the one snapshot, so a rebuild of the same commit
+# installs the same versions; with the base's own, they are recorded in
+# /etc/agentry/browser/packages. No file is
 # setuid or setgid: the base's are stripped, and chromium-sandbox (Debian's
 # setuid sandbox helper) is not installed (the runner runs Chromium's
 # namespace sandbox, or the container is the sandbox).

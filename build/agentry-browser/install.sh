@@ -1,23 +1,27 @@
 #!/bin/sh
 # Install Debian's Chromium at the version source.env pins, and the fonts a
 # page needs, from snapshot.debian.org at source.env's timestamp, so every
-# package in the image is the one that timestamp's archive held.
+# package this installs is the one that timestamp's archive held.
 #
 #   install.sh <source.env> <browsers.json> <out>
 #
-# Fails closed: unless the archive's signed index offers chromium at
-# source.env's Debian version with source.env's SHA-256 for TARGETARCH,
-# unless that is the version installed, unless the executable is where the
-# image points the server, and unless the lockfile's Playwright (browsers.json)
-# was made for this Chromium's major version or the next one, the pairing the
-# Chrome DevTools Protocol between them is kept for. Runs in the Dockerfile,
-# never in a person's run.
+# Fails closed: unless each of the three signed indexes the snapshot serves
+# (trixie, trixie-updates, trixie-security) matches source.env's SHA-256,
+# which pins every package in them, unless the chromium and
+# chromium-common packages downloaded at source.env's Debian version match
+# source.env's SHA-256s for TARGETARCH, unless that is the version installed,
+# unless the executable is where the image points the server, and unless the
+# lockfile's Playwright (browsers.json) was made for this Chromium's major
+# version or the next one, the pairing Playwright drives Chromium's DevTools
+# protocol for. Runs in the Dockerfile, never in a person's run.
 #
-# The sources are plain http: the base has no CA certificates yet, and apt
-# holds every index to the archive's signature (the base's
-# debian-archive-keyring) and every package to the index's SHA-256, so the
-# transport carries nothing that is trusted. Check-Valid-Until is off because
-# a snapshot's signed Release files expire a week after they were made.
+# The sources are plain http: the base has no CA certificates yet. apt holds
+# every index to the archive's signature (the base's debian-archive-keyring)
+# and every package to the index's SHA-256, and the two Chromium packages are
+# also held to source.env's. Check-Valid-Until is off because a snapshot's
+# signed Release files expire a week after they were made, so the indexes'
+# own SHA-256s are what stop an older signed index being served in their
+# place.
 #
 # <out> then holds chromium.record, one line the Dockerfile adds to the
 # image's record: `chromium <version> <debian version> <arch> <sha256>
@@ -27,9 +31,9 @@ set -eu
 	echo "usage: install.sh <source.env> <browsers.json> <out>" >&2
 	exit 2
 }
-env="$1" browsers="$2" out="$3"
+src="$1" browsers="$2" out="$3"
 # shellcheck source=/dev/null
-. "$env"
+. "$src"
 
 refuse() {
 	echo "install.sh: $*" >&2
@@ -37,8 +41,8 @@ refuse() {
 }
 
 case "${TARGETARCH:-}" in
-amd64) sum="$CHROMIUM_SHA256_AMD64" ;;
-arm64) sum="$CHROMIUM_SHA256_ARM64" ;;
+amd64) sum="$CHROMIUM_SHA256_AMD64" commonSum="$CHROMIUM_COMMON_SHA256_AMD64" ;;
+arm64) sum="$CHROMIUM_SHA256_ARM64" commonSum="$CHROMIUM_COMMON_SHA256_ARM64" ;;
 *) refuse "no Chromium pin for TARGETARCH=${TARGETARCH:-unset}" ;;
 esac
 
@@ -74,10 +78,12 @@ SOURCES
 
 # The snapshot archive is slow and fails now and then; each step is retried
 # half a minute apart, and a failure is never taken as a success.
+tries=5
 retry() {
-	for try in 1 2 3 4 5; do
-		"$@" && return 0
-		[ "$try" = 5 ] && return 1
+	n=1
+	until "$@"; do
+		[ "$n" -ge "$tries" ] && return 1
+		n=$((n + 1))
 		sleep 30
 	done
 }
@@ -86,20 +92,39 @@ apt="apt-get -o Acquire::Retries=5 -o APT::Install-Recommends=false -o APT::Inst
 # shellcheck disable=SC2086 # $apt is a word list
 retry $apt update || refuse "apt-get update from the snapshot failed"
 
-got=$(apt-cache show "chromium=$CHROMIUM_DEB_VERSION" | sed -n 's/^SHA256: //p' | head -n 1)
-[ "$got" = "$sum" ] ||
-	refuse "the archive's chromium $CHROMIUM_DEB_VERSION for $TARGETARCH has SHA-256 ${got:-none}; source.env pins $sum"
+# Each signed index apt kept must be the one source.env pins, and there must
+# be exactly these three.
+lists=/var/lib/apt/lists
+[ "$(find "$lists" -maxdepth 1 -name '*_InRelease' | wc -l)" = 3 ] ||
+	refuse "apt kept other indexes than trixie, trixie-updates and trixie-security"
+for pair in "debian_${DEBIAN_SNAPSHOT}_dists_trixie $DEBIAN_INDEX_SHA256_TRIXIE" \
+	"debian_${DEBIAN_SNAPSHOT}_dists_trixie-updates $DEBIAN_INDEX_SHA256_TRIXIE_UPDATES" \
+	"debian-security_${DEBIAN_SNAPSHOT}_dists_trixie-security $DEBIAN_INDEX_SHA256_TRIXIE_SECURITY"; do
+	f="$lists/snapshot.debian.org_archive_${pair% *}_InRelease"
+	echo "${pair#* }  $f" | sha256sum -c - || refuse "$f is not the index source.env pins"
+done
+
+# The two Chromium packages are downloaded and held to source.env's SHA-256
+# before anything is installed from them.
+work=$(mktemp -d)
+chown _apt "$work"
+# shellcheck disable=SC2086 # $apt is a word list
+(cd "$work" && retry $apt download "chromium=$CHROMIUM_DEB_VERSION" "chromium-common=$CHROMIUM_DEB_VERSION") ||
+	refuse "downloading chromium $CHROMIUM_DEB_VERSION failed"
+deb="$work/chromium_$(echo "$CHROMIUM_DEB_VERSION" | sed 's/:/%3a/')_$TARGETARCH.deb"
+common="$work/chromium-common_$(echo "$CHROMIUM_DEB_VERSION" | sed 's/:/%3a/')_$TARGETARCH.deb"
+echo "$sum  $deb" | sha256sum -c - || refuse "$deb does not match source.env's SHA-256"
+echo "$commonSum  $common" | sha256sum -c - || refuse "$common does not match source.env's SHA-256"
 
 # The fonts Playwright installs beside its own Chromium on Debian 13, without
 # the X server: the browser runs headless.
 fonts="fonts-liberation fonts-noto-color-emoji fonts-unifont xfonts-scalable fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf fonts-freefont-ttf"
 # shellcheck disable=SC2086 # $apt and $fonts are word lists
-retry $apt install -y \
-	"chromium=$CHROMIUM_DEB_VERSION" "chromium-common=$CHROMIUM_DEB_VERSION" $fonts ||
-	refuse "installing chromium $CHROMIUM_DEB_VERSION failed"
-rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+retry $apt install -y "$deb" "$common" $fonts || refuse "installing chromium $CHROMIUM_DEB_VERSION failed"
+rm -rf "$work" /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
 
-[ "$(dpkg-query -W -f '${Version}' chromium)" = "$CHROMIUM_DEB_VERSION" ] ||
+[ "$(dpkg-query -W -f '${Version}' chromium)" = "$CHROMIUM_DEB_VERSION" ] &&
+	[ "$(dpkg-query -W -f '${Version}' chromium-common)" = "$CHROMIUM_DEB_VERSION" ] ||
 	refuse "chromium installed is not $CHROMIUM_DEB_VERSION"
 [ -x /usr/lib/chromium/chromium ] || refuse "no executable at /usr/lib/chromium/chromium"
 

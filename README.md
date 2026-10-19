@@ -371,12 +371,14 @@ sandbox, output folder, secrets file).
 - Chromium is Debian's build from the Chromium project's open-source code, with
   no Widevine CDM and no other proprietary component. `install.sh` installs it
   from [snapshot.debian.org](https://snapshot.debian.org/) at the timestamp in
-  `source.env`, so every Debian package in the image (its libraries and fonts
-  too) is the one that snapshot held. apt checks each index against Debian's
-  archive signature and each package against the index, and `install.sh`
-  refuses unless the chromium package has `source.env`'s version and, for the
-  architecture, its SHA-256, and unless the lockfile's `playwright-core` was
-  made for that Chromium major version or the next one (its `browsers.json`).
+  `source.env`, so every package it installs (Chromium's libraries and the
+  fonts too) is the one that snapshot held. apt checks each index against
+  Debian's archive signature and each package against the index, and
+  `install.sh` refuses unless each suite's signed index (`InRelease`) has the
+  SHA-256 in `source.env`, unless the `chromium` and `chromium-common` packages have
+  `source.env`'s version and, for the architecture, its SHA-256s, and unless
+  the lockfile's `playwright-core` was made for that Chromium major version or
+  the next one (its `browsers.json`).
   The server is pointed at `/usr/lib/chromium/chromium` by
   `PLAYWRIGHT_MCP_EXECUTABLE_PATH`. Playwright's own browser download is
   Google's Chrome for Testing, which this image must not carry; the checks fail
@@ -386,8 +388,8 @@ sandbox, output folder, secrets file).
   `/etc/chromium/policies/managed/`. It sets
   `EncryptedClientHelloEnabled: false` (no launch flag can; Chromium otherwise
   sends a GREASE ECH extension, which the run's browse proxy refuses) and turns
-  off QUIC, DNS-over-HTTPS, WebRTC UDP outside the proxy, component updates and
-  the browser's background services.
+  off QUIC, DNS-over-HTTPS, WebRTC UDP outside the proxy, component updates,
+  Cast discovery and the browser's background services.
 
 It runs as uid 10001 (`browser`) in `/out-browser`, where the runner binds the
 run's `reports/browser/`, with no setuid or setgid file (Debian's setuid
@@ -401,8 +403,10 @@ To bump: set the new version in `package.json` and run `npm install
 snapshot.debian.org timestamp whose `trixie-security` (or `trixie`) holds a
 `chromium` for the major version the new `browsers.json` names, or the one
 before it, and set `DEBIAN_SNAPSHOT`, `CHROMIUM_VERSION`,
-`CHROMIUM_DEB_VERSION` and the SHA-256 of the package in that snapshot's
-`binary-amd64` and `binary-arm64` `Packages` indexes.
+`CHROMIUM_DEB_VERSION`, the SHA-256s of `chromium` and `chromium-common` in
+that snapshot's `binary-amd64` and `binary-arm64` `Packages` indexes, and the
+SHA-256 of the `InRelease` of `trixie`, `trixie-updates` and `trixie-security`
+at that snapshot.
 
 ### agentry-docker-agent-src
 

@@ -275,14 +275,14 @@ it, and under which terms:
   155.0.8059.79-1~deb13u1 (with `chromium-common`), built by Debian from the
   source of the Chromium open-source project
   (https://www.chromium.org/), installed unchanged in `/usr/lib/chromium/` and
-  held to the package SHA-256 in `build/agentry-browser/source.env`.
+  held to the package SHA-256s in `build/agentry-browser/source.env`.
   Chromium's own code is under the BSD-3-Clause licence, and the third-party
   code it bundles under their own open-source licences; Debian's copyright
   file lists them and is at
   `/usr/share/licenses/agentry-browser/chromium/copyright` (and
   `/usr/share/doc/chromium-common/copyright`), and the browser lists them too
-  (`chrome://credits`). The build carries no Widevine CDM and no other
-  proprietary component. Its source: Debian's `chromium` source package at
+  (`chrome://credits`). It comes from Debian's main archive, which holds only
+  free software, and carries no Widevine CDM. Its source: Debian's `chromium` source package at
   that version, from
   https://snapshot.debian.org/package/chromium/155.0.8059.79-1~deb13u1/
   (or https://sources.debian.org/src/chromium/ while the version is current),

@@ -17,5 +17,6 @@
   "SpellCheckServiceEnabled": false,
   "TranslateEnabled": false,
   "BackgroundModeEnabled": false,
-  "DefaultSearchProviderEnabled": false
+  "DefaultSearchProviderEnabled": false,
+  "EnableMediaRouter": false
 }
