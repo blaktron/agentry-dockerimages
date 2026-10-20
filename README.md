@@ -52,6 +52,7 @@ list. Built images are listed with what they are built from.
 | `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
+| `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
@@ -65,8 +66,9 @@ Mirrors used only as bases when building:
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
-| `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/`: base. |
-| `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. |
+| `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
+| `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
+| `agentry-golang-trixie` | `golang:1.27.2-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
 
 Packages that the publishing workflows create in this public repository are
 public, so the images a run pulls need no registry login. The build-time
@@ -174,6 +176,7 @@ scripts/check.sh --codex-image <ref>
 scripts/check.sh --hostlink-image <ref>
 scripts/check.sh --ripgrep-image <ref>
 scripts/check.sh --browser-image <ref>
+scripts/check.sh --coder-image <ref>
 ```
 
 `PLATFORM` (for example `linux/arm64`) asks for, and checks, one
@@ -211,7 +214,7 @@ moved tags, mirrors every `mirror` row (or the named ones) and builds every
 context that has no `PLATFORMS`.
 
 Each built image that has `PLATFORMS` has a workflow of its own: `unsafe-kali`,
-`files`, `typst`, `codex`, `hostlink`, `ripgrep` and `browser`. They are
+`files`, `typst`, `codex`, `hostlink`, `ripgrep`, `browser` and `coder`. They are
 dispatched by hand and refuse to run from any branch but `main`. Each:
 
 - mirrors its build-time base by digest, so the package exists and is public
@@ -230,7 +233,7 @@ sign the joined digest with cosign, keyless, as the workflow itself
 print the verify command in the run's summary.
 
 Verify a published digest, with the workflow named for the image (`files`,
-`typst`, `codex`, `hostlink`, `ripgrep` or `browser`):
+`typst`, `codex`, `hostlink`, `ripgrep`, `browser` or `coder`):
 
 ```
 cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
@@ -411,6 +414,42 @@ before it, and set `DEBIAN_SNAPSHOT`, `CHROMIUM_VERSION`,
 that snapshot's `binary-amd64` and `binary-arm64` `Packages` indexes, and the
 SHA-256 of the `InRelease` of `trixie`, `trixie-updates` and `trixie-security`
 at that snapshot.
+
+### agentry-coder
+
+The toolchain of the Coding agent, the persistent agent that builds and runs
+software in its sandbox. The runner builds the agent's exec container from it,
+adding its own binary; what the container may reach and which folders it
+mounts are the runner's settings. It holds:
+
+- from Debian 13's archive, at the snapshot.debian.org timestamp in
+  `source.env`, with each suite's signed index held to its SHA-256:
+  `build-essential` (GCC and G++, GNU Make, the C library's headers), `cmake`,
+  `pkg-config`, `git`, `curl`, `ca-certificates`, `python3` with `python3-pip`,
+  `python3-venv` and `python3-dev`, and `unzip`, `zip`, `xz-utils`, `bzip2`,
+  `patch`, `file`, `jq`, `procps` and `less` (`PACKAGES` in `source.env`);
+- Go, the Go project's release, in `/usr/local/go`, from the
+  `golang:1.27.2-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
+  asks for a newer Go fails instead of downloading a toolchain;
+- Node 24 and npm, from the `node:24-bookworm-slim` mirror.
+
+Python packages install into a virtual environment (`python3 -m venv`):
+Debian marks its own Python as externally managed. There is no `sudo` and no
+SSH client or server (a dev server is reached through the runner's host link,
+which holds the sign-in), and `scripts/check.sh` refuses a `PACKAGES` that adds
+one; with no setuid file, the base's `su` cannot change user.
+
+It runs as uid 10001 (`coder`) in `/home/coder`, with no setuid or setgid file.
+Debian package versions are recorded in `/etc/agentry/coder/packages`, each
+tool's version and the snapshot in `/etc/agentry/coder/record`, Go's, Node's
+and npm's licences in `/usr/share/licenses/agentry-coder`.
+
+To bump Go: mirror the new `golang:<version>-trixie` (a row in `images.tsv`),
+then set `GO_IMAGE` in `bases.env` and `GO_VERSION` in `source.env`. To move
+the Debian packages: pick a snapshot.debian.org timestamp and set
+`DEBIAN_SNAPSHOT` and the SHA-256 of the `InRelease` of `trixie`,
+`trixie-updates` and `trixie-security` at it. Then run `--coder-image` on a
+local build and dispatch the `coder` workflow from `main`.
 
 ### agentry-docker-agent-src
 

@@ -51,10 +51,20 @@
 #     does not use the snapshot or check the SHA-256 and browsers.json; or the
 #     context names Google's Chrome for Testing, its download, Playwright's
 #     browser download or a Widevine CDM (build/agentry-browser).
+#   - the Coding agent's toolchain image's source.env does not pin Go, Node's
+#     major version, a snapshot.debian.org timestamp and its three indexes'
+#     SHA-256; its PACKAGES lacks a tool the image promises or names sudo, an
+#     SSH client or server, or another way to a privilege; its Dockerfile does
+#     not copy Go and Node from the bases, install with install.sh, strip
+#     setuid and setgid bits, keep GOTOOLCHAIN local, or run as uid 10001; or
+#     install.sh does not use the snapshot, hold its indexes to their SHA-256
+#     and Go and Node to source.env, or holds a source to anything but
+#     Debian's archive key (build/agentry-coder).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
-# --ripgrep-image and --browser-image mode, which run the image they name.
+# --ripgrep-image, --browser-image and --coder-image mode, which run the image
+# they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -163,6 +173,18 @@
 #       ClientHello with no ECH; then the probe's control, with the policy
 #       folder hidden, must see ECH offered. PLATFORM asks for, and checks,
 #       one architecture.
+#   scripts/check.sh --coder-image <ref>
+#       run a built agentry-coder hardened, as the runner runs an exec
+#       container: no network, every capability dropped, no new privileges, a
+#       read-only root, the image's own user, a tmpfs home and /tmp, a working
+#       folder bound read-write. It fails unless the user is uid 10001, the
+#       record names source.env's Go, Node's major version and the snapshot,
+#       every package of PACKAGES is in the package record, no file is setuid
+#       or setgid, no sudo, ssh or sshd is on the PATH, the licences are
+#       there, and build/agentry-coder/check/probe.sh, in the working folder,
+#       hears every tool answer, builds and runs a C program with cmake and
+#       make, a Go module, a Python virtual environment and a Node script, and
+#       commits with git. PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -233,7 +255,7 @@ checkScripts() {
 			bad=1
 		}
 	done
-	shellcheck scripts/*.sh build/agentry-files/tika-app build/typst/fetch.sh build/agentry-codex/fetch.sh build/agentry-codex/verify.sh build/agentry-browser/install.sh || bad=1
+	shellcheck scripts/*.sh build/agentry-files/tika-app build/typst/fetch.sh build/agentry-codex/fetch.sh build/agentry-codex/verify.sh build/agentry-browser/install.sh build/agentry-coder/install.sh build/agentry-coder/check/probe.sh || bad=1
 	return "$bad"
 }
 
@@ -1910,9 +1932,242 @@ browserImage() {
 	return "$bad"
 }
 
+CODER_CTX=build/agentry-coder
+
+# CODER_TOOLS are the packages the image promises, which PACKAGES must hold;
+# CODER_REFUSED the ones it must never install: a way to root (sudo, doas,
+# polkit's pkexec), or an SSH client or server, since a dev server is reached
+# through the runner's host link, which holds the sign-in.
+CODER_TOOLS="ca-certificates curl git build-essential make cmake pkg-config python3 python3-dev python3-pip python3-venv"
+CODER_REFUSED="sudo doas opendoas pkexec polkitd openssh-client openssh-server dropbear dropbear-bin ssh"
+
+# checkCoder holds the Coding agent's toolchain image's context to its
+# contract: source.env pins Go, Node's major version, the snapshot and its
+# three signed indexes, and a PACKAGES that holds every promised tool and no
+# refused one; the Dockerfile copies Go and Node from the bases, installs
+# with install.sh, strips setuid and setgid bits, keeps GOTOOLCHAIN local
+# and runs as uid 10001; install.sh installs from the snapshot, holds the
+# indexes to their SHA-256 and Go and Node to source.env, and every source
+# to Debian's archive key.
+checkCoder() {
+	local bad=0
+	(
+		# shellcheck source=/dev/null
+		. "$CODER_CTX/source.env"
+		b=0
+		[[ "${GO_VERSION:-}" =~ ^1\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$CODER_CTX/source.env: GO_VERSION is not a Go release: ${GO_VERSION:-}"
+			b=1
+		}
+		[[ "${NODE_MAJOR:-}" =~ ^[0-9]+$ ]] && [ $((NODE_MAJOR % 2)) = 0 ] || {
+			echo "$CODER_CTX/source.env: NODE_MAJOR is not an even (LTS) Node major version: ${NODE_MAJOR:-}"
+			b=1
+		}
+		[[ "${DEBIAN_SNAPSHOT:-}" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || {
+			echo "$CODER_CTX/source.env: DEBIAN_SNAPSHOT is not a snapshot.debian.org timestamp: ${DEBIAN_SNAPSHOT:-}"
+			b=1
+		}
+		for key in DEBIAN_INDEX_SHA256_TRIXIE DEBIAN_INDEX_SHA256_TRIXIE_UPDATES DEBIAN_INDEX_SHA256_TRIXIE_SECURITY; do
+			val="${!key:-}"
+			[[ "$val" =~ ^[0-9a-f]{64}$ ]] || {
+				echo "$CODER_CTX/source.env: $key is not a SHA-256: $val"
+				b=1
+			}
+		done
+		for p in $CODER_TOOLS; do
+			[[ " ${PACKAGES:-} " == *" $p "* ]] || {
+				echo "$CODER_CTX/source.env: PACKAGES does not install $p"
+				b=1
+			}
+		done
+		for p in ${PACKAGES:-}; do
+			[[ "$p" =~ ^[a-z0-9][a-z0-9+.-]+$ ]] || {
+				echo "$CODER_CTX/source.env: PACKAGES names $p, which is not a bare package name (no version, no release)"
+				b=1
+			}
+			[[ " $CODER_REFUSED " == *" $p "* ]] && {
+				echo "$CODER_CTX/source.env: PACKAGES names $p, which the image must never hold"
+				b=1
+			}
+		done
+		[ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$CODER_CTX/source.env: PLATFORMS is not linux/amd64,linux/arm64: ${PLATFORMS:-}"
+			b=1
+		}
+		[ "${IMAGE_NAME:-}" = agentry-coder ] || {
+			echo "$CODER_CTX/source.env: IMAGE_NAME is not agentry-coder"
+			b=1
+		}
+		grep -qx "GO_IMAGE=golang:${GO_VERSION:-}-trixie" "$CODER_CTX/bases.env" || {
+			echo "$CODER_CTX/bases.env: GO_IMAGE is not golang:${GO_VERSION:-}-trixie, the Go source.env pins"
+			b=1
+		}
+		grep -qx "NODE_IMAGE=node:${NODE_MAJOR:-}-bookworm-slim" "$CODER_CTX/bases.env" || {
+			echo "$CODER_CTX/bases.env: NODE_IMAGE is not node:${NODE_MAJOR:-}-bookworm-slim, the Node source.env pins"
+			b=1
+		}
+		exit "$b"
+	) || bad=1
+	if ! grep -qx 'COPY --from=go /usr/local/go /usr/local/go' "$CODER_CTX/Dockerfile" ||
+		! grep -qx 'COPY --from=node /usr/local/bin/node /usr/local/bin/node' "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/Dockerfile: does not copy Go and Node from the bases"
+		bad=1
+	fi
+	if ! grep -qx 'RUN sh /agentry/install.sh /agentry/source.env /agentry/out' "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/Dockerfile: does not install the toolchain with install.sh"
+		bad=1
+	fi
+	if ! grep -q '^RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + ' "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/Dockerfile: does not strip setuid and setgid bits"
+		bad=1
+	fi
+	if ! grep -q '^[[:space:]]*GOTOOLCHAIN=local' "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/Dockerfile: does not keep GOTOOLCHAIN local"
+		bad=1
+	fi
+	if ! grep -qx 'USER 10001:10001' "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/Dockerfile: does not run as uid 10001"
+		bad=1
+	fi
+	# shellcheck disable=SC2016 # install.sh's own variables, matched literally
+	if ! grep -qF 'sha256sum -c - || refuse "$f is not the index source.env pins"' "$CODER_CTX/install.sh" ||
+		! grep -qF 'URIs: http://snapshot.debian.org/archive/debian/$DEBIAN_SNAPSHOT' "$CODER_CTX/install.sh" ||
+		! grep -qF 'URIs: http://snapshot.debian.org/archive/debian-security/$DEBIAN_SNAPSHOT' "$CODER_CTX/install.sh" ||
+		! grep -qF 'refuse "/usr/local/go is' "$CODER_CTX/install.sh" ||
+		! grep -qF 'refuse "node is $node, not Node $NODE_MAJOR"' "$CODER_CTX/install.sh"; then
+		echo "$CODER_CTX/install.sh: does not install from the snapshot, hold its indexes to their SHA-256 and Go and Node to source.env"
+		bad=1
+	fi
+	if [ "$(grep -c '^Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg$' "$CODER_CTX/install.sh")" != 2 ] ||
+		grep -Ein 'trusted[=:] *yes|allow-?unauthenticated|allow-?insecure|AllowDowngradeToInsecure' "$CODER_CTX/install.sh" "$CODER_CTX/Dockerfile"; then
+		echo "$CODER_CTX/install.sh: an apt source is not held to Debian's archive key, or signature checking is turned off"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# coderImage runs a built agentry-coder hardened, as the runner runs an exec
+# container (no network, every capability dropped, no new privileges, a
+# read-only root, the image's own user, a tmpfs home and /tmp, a working
+# folder bound read-write). It fails unless the user is uid 10001, the
+# record names source.env's Go, Node's major version and the snapshot,
+# every package of PACKAGES is in the package record, no file is setuid or
+# setgid, no sudo, ssh or sshd is on the PATH, the licences are there,
+# and check/probe.sh builds and runs a project with each toolchain.
+# PLATFORM asks for, and checks, one architecture.
+coderImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" bad=0 want arch uid out dir p
+	checkCoder || return 1
+	# mktemp honours TMPDIR, so a caller can keep this work directory off a small /tmp.
+	dir=$(mktemp -d)
+	chmod 0777 "$dir"
+	# shellcheck disable=SC2064 # expand now: it is local
+	trap "rm -rf '$dir'" EXIT
+	local plat=()
+	[ -n "${PLATFORM:-}" ] && plat=(--platform "$PLATFORM")
+	# The tmpfs mounts allow exec: a build runs what it compiles there.
+	# shellcheck disable=SC2054 # the commas are the tmpfs mounts' options
+	local run=("$runtime" run --rm "${plat[@]}" --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /tmp:size=1g,exec --tmpfs /home/coder:size=1g,exec,uid=10001,gid=10001,mode=0700
+		--pids-limit 1024 --memory 4g)
+	# shellcheck source=/dev/null
+	. "$CODER_CTX/source.env"
+
+	arch=$("${run[@]}" --entrypoint /usr/bin/uname "$ref" -m)
+	case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+	if [ -n "${PLATFORM:-}" ]; then
+		want="${PLATFORM##*/}"
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+
+	uid=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u)
+	if [ "$uid" = 10001 ]; then
+		echo "ok   runs as uid 10001, not root"
+	else
+		echo "FAIL runs as uid $uid, not 10001"
+		bad=1
+	fi
+	out=$("$runtime" image inspect "$ref" --format '{{.Config.User}} {{.Config.WorkingDir}}')
+	if [ "$out" = '10001:10001 /home/coder' ]; then
+		echo "ok   user 10001:10001 in /home/coder"
+	else
+		echo "FAIL user and working directory: $out"
+		bad=1
+	fi
+
+	echo "record:"
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/coder/record | tee "$dir/record" | sed 's/^/  /'
+	if grep -qx "go $GO_VERSION" "$dir/record" && grep -Eqx "node $NODE_MAJOR\.[0-9]+\.[0-9]+" "$dir/record" &&
+		grep -qx "snapshot $DEBIAN_SNAPSHOT" "$dir/record"; then
+		echo "ok   the record names source.env's Go, Node $NODE_MAJOR and the snapshot"
+	else
+		echo "FAIL the record does not match source.env"
+		bad=1
+	fi
+	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/coder/packages >"$dir/packages"
+	echo "  $(wc -l <"$dir/packages") Debian packages recorded"
+	for p in $PACKAGES; do
+		if ! grep -q "^$p " "$dir/packages"; then
+			echo "FAIL $p is not in the package record"
+			bad=1
+		fi
+	done
+	for p in $CODER_REFUSED; do
+		if grep -q "^$p " "$dir/packages"; then
+			echo "FAIL $p is installed"
+			bad=1
+		fi
+	done
+
+	# shellcheck disable=SC2016 # expands in the container's shell
+	if out=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'for c in sudo doas pkexec ssh sshd scp sftp dropbear; do command -v "$c"; done; true') && [ -z "$out" ]; then
+		echo "ok   no sudo, ssh or sshd on the PATH"
+	else
+		echo "FAIL on the PATH: $out"
+		bad=1
+	fi
+
+	local lic="go/LICENSE node/LICENSE npm/LICENSE"
+	# shellcheck disable=SC2016 # $f expands in the container's shell
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'cd /usr/share/licenses/agentry-coder && for f in '"$lic"'; do test -s "$f" || { echo "missing $f"; exit 1; }; done'; then
+		echo "ok   the licences are in /usr/share/licenses/agentry-coder"
+	else
+		echo "FAIL a licence is missing from /usr/share/licenses/agentry-coder"
+		bad=1
+	fi
+
+	# The scan reads the image as built: root with DAC_READ_SEARCH alone, and
+	# no tmpfs hiding what the image holds. A scan that could not finish
+	# fails.
+	local suid f
+	if ! suid=$("$runtime" run --rm "${plat[@]}" --network none --cap-drop ALL --cap-add DAC_READ_SEARCH \
+		--security-opt no-new-privileges --security-opt label=disable --user 0:0 --entrypoint /usr/bin/find \
+		"$ref" / -xdev -type f -perm /6000); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+
+	if ! "${run[@]}" -v "$dir:/work:rw" -v "$PWD/$CODER_CTX/check:/check:ro" --entrypoint /bin/bash "$ref" /check/probe.sh; then
+		echo "FAIL the probe"
+		bad=1
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser; do
+	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -1970,6 +2225,15 @@ browserexec checkBrowser
 browserpolicy checkBrowser
 browserproprietary checkBrowser
 browserwidevine checkBrowser
+codergo checkCoder
+codertool checkCoder
+codersudo checkCoder
+coderssh checkCoder
+coderuser checkCoder
+codersetuid checkCoder
+codertoolchain checkCoder
+coderindex checkCoder
+codertrusted checkCoder
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -2020,6 +2284,15 @@ breakCase() {
 	browserpolicy) sed -i 's|/etc/chromium/policies/managed/agentry.json|/etc/opt/chrome/policies/managed/agentry.json|' build/agentry-browser/Dockerfile ;;
 	browserproprietary) printf 'CHROMIUM_URL=https://storage.googleapis.com/chrome-for-testing-public\n' >>build/agentry-browser/source.env ;;
 	browserwidevine) printf 'COPY WidevineCdm /usr/lib/chromium/WidevineCdm\n' >>build/agentry-browser/Dockerfile ;;
+	codergo) sed -i 's/^GO_VERSION=.*/GO_VERSION=latest/' build/agentry-coder/source.env ;;
+	codertool) sed -i '/^PACKAGES=/s/ cmake / /' build/agentry-coder/source.env ;;
+	codersudo) sed -i '/^PACKAGES=/s/ git / git sudo /' build/agentry-coder/source.env ;;
+	coderssh) sed -i '/^PACKAGES=/s/ git / git openssh-client /' build/agentry-coder/source.env ;;
+	coderuser) sed -i '/^USER 10001:10001$/d' build/agentry-coder/Dockerfile ;;
+	codersetuid) sed -i 's|^RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + \\$|RUN true \\|' build/agentry-coder/Dockerfile ;;
+	codertoolchain) sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/' build/agentry-coder/Dockerfile ;;
+	coderindex) sed -i 's/ | sha256sum -c - || refuse "\$f is not/ | true || refuse "$f is not/' build/agentry-coder/install.sh ;;
+	codertrusted) sed -i '0,/^Signed-By: .*/s//Trusted: yes/' build/agentry-coder/install.sh ;;
 	esac
 }
 
@@ -2102,6 +2375,13 @@ case "${1:-}" in
 	}
 	browserImage "$2"
 	;;
+--coder-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --coder-image <ref>" >&2
+		exit 2
+	}
+	coderImage "$2"
+	;;
 --ripgrep-image)
 	[ $# -eq 2 ] || {
 		echo "usage: scripts/check.sh --ripgrep-image <ref>" >&2
@@ -2118,7 +2398,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --docker-agent-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --docker-agent-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --coder-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac
