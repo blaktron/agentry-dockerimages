@@ -42,7 +42,7 @@
 # so no frontend image is pulled from a floating tag.
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
-ARG GO_IMAGE=golang:1.27.2-trixie
+ARG GO_IMAGE=golang:1.27.3-trixie
 ARG NODE_IMAGE=node:24-bookworm-slim
 
 FROM ${GO_IMAGE} AS go
