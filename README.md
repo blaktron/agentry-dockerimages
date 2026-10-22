@@ -78,7 +78,7 @@ building that context needs a `docker login ghcr.io` with read access.
 Each image is referenced by digest, for example:
 
 ```
-ghcr.io/blaktron/agentry-alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8
+ghcr.io/blaktron/agentry-alpine:3.22@sha256:d406446bc05b82480756ce8f1287964d28768c23955fa9480d2a74a2eae7a654
 ```
 
 The runner's operator policy can point these at another registry or pin them
