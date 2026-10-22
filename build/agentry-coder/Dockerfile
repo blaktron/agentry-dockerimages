@@ -18,20 +18,26 @@
 #                        toolchain
 #   /usr/local/bin/node  Node, and npm in /usr/local/lib/node_modules/npm,
 #                        the files taken from NODE_IMAGE
+#   /usr/local/bin/gh, glab, tea, osv-scanner, gitleaks
+#                        each its project's static release binary, held to
+#                        the SHA-256 source.env pins for this architecture
+#                        (install.sh)
 #   /etc/agentry/coder/record
 #                        one line per tool and its version, and the snapshot,
 #                        for the receipt
 #   /etc/agentry/coder/packages
 #                        every Debian package installed, name and version
 #   /usr/share/licenses/agentry-coder
-#                        Go's and Node's LICENSE and npm's; each Debian
+#                        Go's and Node's LICENSE and npm's, and each release
+#                        binary's under its name; each Debian
 #                        package's is in /usr/share/doc/<package>/copyright
 #
 # pip installs into a virtual environment (python3 -m venv): Debian marks its
 # own Python as externally managed. No file is setuid or setgid: the base's
 # and the packages' are stripped. There is no sudo and no SSH client or
 # server: a dev server is reached through the runner's host link, which holds
-# the sign-in.
+# the sign-in. gh and glab are told not to send usage reports or look for
+# updates.
 #
 # It runs as uid 10001 (coder), never root, in /home/coder.
 #
@@ -70,6 +76,11 @@ RUN find / -xdev -type f -perm /6000 -exec chmod ug-s {} + \
 ENV PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
 	GOTOOLCHAIN=local \
 	NPM_CONFIG_UPDATE_NOTIFIER=false \
+	GH_TELEMETRY=false \
+	GH_NO_UPDATE_NOTIFIER=1 \
+	GH_NO_EXTENSION_UPDATE_NOTIFIER=1 \
+	GLAB_SEND_TELEMETRY=false \
+	GLAB_CHECK_UPDATE=false \
 	HOME=/home/coder
 USER 10001:10001
 WORKDIR /home/coder
