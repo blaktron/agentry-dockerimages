@@ -25,7 +25,7 @@ step() {
 }
 
 cd /work || exit 1
-rm -rf c go py node git
+rm -rf c go py node git leak osv
 
 # Each tool answers --version.
 for t in git curl gcc g++ cc make cmake pkg-config python3 node npm npx jq zip xz bzip2 patch file; do
@@ -33,6 +33,25 @@ for t in git curl gcc g++ cc make cmake pkg-config python3 node npm npx jq zip x
 done
 step "go answers" go version
 step "unzip answers" unzip -v
+for t in gh glab tea osv-scanner; do
+	step "$t answers" "$t" --version
+done
+step "gitleaks answers" gitleaks version
+step "gh and glab send no usage report and look for no update" sh -c '[ "$GH_TELEMETRY" = false ] && [ -n "$GH_NO_UPDATE_NOTIFIER" ] && [ -n "$GH_NO_EXTENSION_UPDATE_NOTIFIER" ] && [ "$GLAB_SEND_TELEMETRY" = false ] && [ "$GLAB_CHECK_UPDATE" = false ]'
+
+# gitleaks finds a token planted in a folder and nothing in a clean one. The
+# token is made here, so this file holds none.
+mkdir -p leak/found leak/clean
+tok="ghp_$(head -c 400 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 36)"
+printf 'token = "%s"\n' "$tok" >leak/found/config.txt
+echo 'nothing to see' >leak/clean/readme.txt
+step "gitleaks finds a planted token" sh -c 'gitleaks dir leak/found --no-banner --exit-code 3 >/dev/null 2>&1; [ $? = 3 ]'
+step "gitleaks finds nothing in a clean folder" gitleaks dir leak/clean --no-banner --exit-code 3
+
+# osv-scanner offline with no database fails for want of the database, and
+# never says it found no issues.
+mkdir -p osv && printf 'module example.com/x\n\ngo 1.22\n\nrequire golang.org/x/net v0.0.1\n' >osv/go.mod
+step "osv-scanner offline with no database refuses to answer" sh -c 'out=$(osv-scanner scan source --offline osv 2>&1); [ $? != 0 ] && printf "%s" "$out" | grep -q "no offline version of the OSV database" && ! printf "%s" "$out" | grep -qi "no issues found"'
 
 # C with cmake and make.
 mkdir -p c && cat >c/hello.c <<'C'
@@ -72,5 +91,5 @@ step "node runs a script" sh -c '[ "$(node -e "console.log(\"hello from node\")"
 # git makes a repository and a commit.
 step "git commits" sh -c 'git init -q git && cd git && echo x >x && git add x && git -c user.name=coder -c user.email=coder@example.invalid commit -qm x'
 
-rm -rf c go py node git
+rm -rf c go py node git leak osv
 exit "$bad"
