@@ -59,11 +59,19 @@
 #     setuid and setgid bits, keep GOTOOLCHAIN local, or run as uid 10001; or
 #     install.sh does not use the snapshot, hold its indexes to their SHA-256
 #     and Go and Node to source.env, or holds a source to anything but
-#     Debian's archive key (build/agentry-coder).
+#     Debian's archive key; or source.env does not pin a version and each
+#     architecture's SHA-256 for gh, glab, tea, osv-scanner and gitleaks, or
+#     install.sh does not fetch them over https only and hold each to its
+#     SHA-256 and its version (build/agentry-coder).
+#   - the gog image's source.env does not pin a 40-hex commit and a version
+#     tag; its Dockerfile does not build with CGO off, GOTOOLCHAIN local and
+#     the module sums verified, refuse a dynamically linked binary, strip
+#     setuid and setgid bits and run as gog; or the MCP probe is missing
+#     (build/gog).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
-# --ripgrep-image, --browser-image and --coder-image mode, which run the image
+# --ripgrep-image, --browser-image, --coder-image and --gog-image mode, which run the image
 # they name.
 #
 # Usage:
@@ -178,13 +186,30 @@
 #       container: no network, every capability dropped, no new privileges, a
 #       read-only root, the image's own user, a tmpfs home and /tmp, a working
 #       folder bound read-write. It fails unless the user is uid 10001, the
-#       record names source.env's Go, Node's major version and the snapshot,
+#       record names source.env's Go, Node's major version, the snapshot and
+#       the version of each release binary,
 #       every package of PACKAGES is in the package record, no file is setuid
 #       or setgid, no sudo, ssh or sshd is on the PATH, the licences are
 #       there, and build/agentry-coder/check/probe.sh, in the working folder,
 #       hears every tool answer, builds and runs a C program with cmake and
-#       make, a Go module, a Python virtual environment and a Node script, and
-#       commits with git. PLATFORM asks for, and checks, one architecture.
+#       make, a Go module, a Python virtual environment and a Node script,
+#       commits with git, sees gitleaks find a planted token and nothing in a
+#       clean folder, and sees osv-scanner refuse an offline scan with no
+#       database. PLATFORM asks for, and checks, one architecture.
+#   scripts/check.sh --gog-image <ref>
+#       run a built agentry-gog hardened, as the runner runs its MCP server:
+#       no network, every capability dropped, no new privileges, a read-only
+#       root, uid 10001, GOG_HOME on a tmpfs and the file keyring. It fails
+#       unless `gog --version` names source.env's tag and commit, no file is
+#       setuid or setgid, no sudo or SSH program is on the PATH, the binary
+#       is static, the licence is there, and `gog mcp`, driven over stdio by
+#       build/gog/check/mcp.py, lists only tools annotated read-only with no
+#       flag, more with --allow-write and none of them a send, exactly
+#       Gmail's send tools more with --allow-gmail-send too (which it refuses
+#       alone), and answers a tool call with nobody signed in that there is
+#       no account. Needs
+#       python3, file and timeout. PLATFORM asks for, and checks, one
+#       architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -1940,6 +1965,10 @@ CODER_CTX=build/agentry-coder
 # through the runner's host link, which holds the sign-in.
 CODER_TOOLS="ca-certificates curl git build-essential make cmake pkg-config python3 python3-dev python3-pip python3-venv"
 CODER_REFUSED="sudo doas opendoas pkexec polkitd openssh-client openssh-server dropbear dropbear-bin ssh"
+# CODER_BINARIES are the release binaries source.env pins, by the prefix of
+# their keys there; CODER_COMMANDS the commands they install, in that order.
+CODER_BINARIES="GH GLAB TEA OSV_SCANNER GITLEAKS"
+CODER_COMMANDS="gh glab tea osv-scanner gitleaks"
 
 # checkCoder holds the Coding agent's toolchain image's context to its
 # contract: source.env pins Go, Node's major version, the snapshot and its
@@ -1990,6 +2019,26 @@ checkCoder() {
 				b=1
 			}
 		done
+		for t in $CODER_BINARIES; do
+			v="${t}_VERSION"
+			[[ "${!v:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+				echo "$CODER_CTX/source.env: $v is not a release version: ${!v:-}"
+				b=1
+			}
+			for a in AMD64 ARM64; do
+				v="${t}_SHA256_$a"
+				[[ "${!v:-}" =~ ^[0-9a-f]{64}$ ]] || {
+					echo "$CODER_CTX/source.env: $v is not a SHA-256: ${!v:-}"
+					b=1
+				}
+			done
+		done
+		for v in TEA_LICENSE_SHA256 OSV_SCANNER_LICENSE_SHA256; do
+			[[ "${!v:-}" =~ ^[0-9a-f]{64}$ ]] || {
+				echo "$CODER_CTX/source.env: $v is not a SHA-256: ${!v:-}"
+				b=1
+			}
+		done
 		[ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
 			echo "$CODER_CTX/source.env: PLATFORMS is not linux/amd64,linux/arm64: ${PLATFORMS:-}"
 			b=1
@@ -2036,6 +2085,13 @@ checkCoder() {
 		! grep -qF 'refuse "/usr/local/go is' "$CODER_CTX/install.sh" ||
 		! grep -qF 'refuse "node is $node, not Node $NODE_MAJOR"' "$CODER_CTX/install.sh"; then
 		echo "$CODER_CTX/install.sh: does not install from the snapshot, hold its indexes to their SHA-256 and Go and Node to source.env"
+		bad=1
+	fi
+	# shellcheck disable=SC2016 # install.sh's own variables, matched literally
+	if ! grep -qF 'curl -fsSL --proto '"'"'=https'"'"' --proto-redir '"'"'=https'"'"' --tlsv1.2' "$CODER_CTX/install.sh" ||
+		! grep -qF 'sha256sum -c - || refuse "$1 is not the download source.env pins"' "$CODER_CTX/install.sh" ||
+		! grep -qF 'refuse "${pair% *} is not ${pair#* }, the version source.env pins"' "$CODER_CTX/install.sh"; then
+		echo "$CODER_CTX/install.sh: does not fetch the release binaries over https only, hold each to its SHA-256, or hold their versions to source.env"
 		bad=1
 	fi
 	if [ "$(grep -c '^Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg$' "$CODER_CTX/install.sh")" != 2 ] ||
@@ -2103,8 +2159,11 @@ coderImage() {
 	echo "record:"
 	"${run[@]}" --entrypoint /bin/cat "$ref" /etc/agentry/coder/record | tee "$dir/record" | sed 's/^/  /'
 	if grep -qx "go $GO_VERSION" "$dir/record" && grep -Eqx "node $NODE_MAJOR\.[0-9]+\.[0-9]+" "$dir/record" &&
-		grep -qx "snapshot $DEBIAN_SNAPSHOT" "$dir/record"; then
-		echo "ok   the record names source.env's Go, Node $NODE_MAJOR and the snapshot"
+		grep -qx "snapshot $DEBIAN_SNAPSHOT" "$dir/record" &&
+		grep -qx "gh $GH_VERSION" "$dir/record" && grep -qx "glab $GLAB_VERSION" "$dir/record" &&
+		grep -qx "tea $TEA_VERSION" "$dir/record" && grep -qx "osv-scanner $OSV_SCANNER_VERSION" "$dir/record" &&
+		grep -qx "gitleaks $GITLEAKS_VERSION" "$dir/record"; then
+		echo "ok   the record names source.env's Go, Node $NODE_MAJOR, the snapshot and each release binary's version"
 	else
 		echo "FAIL the record does not match source.env"
 		bad=1
@@ -2132,7 +2191,8 @@ coderImage() {
 		bad=1
 	fi
 
-	local lic="go/LICENSE node/LICENSE npm/LICENSE"
+	local lic="go/LICENSE node/LICENSE npm/LICENSE" c
+	for c in $CODER_COMMANDS; do lic="$lic $c/LICENSE"; done
 	# shellcheck disable=SC2016 # $f expands in the container's shell
 	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'cd /usr/share/licenses/agentry-coder && for f in '"$lic"'; do test -s "$f" || { echo "missing $f"; exit 1; }; done'; then
 		echo "ok   the licences are in /usr/share/licenses/agentry-coder"
@@ -2165,9 +2225,197 @@ coderImage() {
 	return "$bad"
 }
 
+GOG_CTX=build/gog
+
+# checkGog holds the gog image's context to its pins: source.env names a
+# 40-hex upstream commit, a v-prefixed version tag and the image built per
+# architecture; the Dockerfile builds with CGO off, GOTOOLCHAIN local and the
+# module sums verified, refuses a dynamically linked binary, strips setuid
+# and setgid bits and runs as gog; the MCP probe is there.
+checkGog() {
+	local bad=0
+	(
+		# shellcheck source=/dev/null
+		. "$GOG_CTX/source.env"
+		[[ "${UPSTREAM_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+			echo "$GOG_CTX/source.env: UPSTREAM_COMMIT is not a 40-hex commit: ${UPSTREAM_COMMIT:-}"
+			exit 1
+		}
+		[[ "${UPSTREAM_TAG:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$GOG_CTX/source.env: UPSTREAM_TAG is not a version tag: ${UPSTREAM_TAG:-}"
+			exit 1
+		}
+		[ "${IMAGE_NAME:-}" = agentry-gog ] && [ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$GOG_CTX/source.env: want IMAGE_NAME=agentry-gog and PLATFORMS=linux/amd64,linux/arm64"
+			exit 1
+		}
+	) || bad=1
+	local want
+	# shellcheck disable=SC1003 # each trailing backslash is the Dockerfile's line continuation, matched literally
+	for want in 'ENV CGO_ENABLED=0 \' '	GOTOOLCHAIN=local \' 'RUN go mod download && go mod verify' 'USER gog' 'RUN if ldd /out/gog >/dev/null 2>&1; then \'; do
+		if ! grep -qxF -- "$want" "$GOG_CTX/Dockerfile"; then
+			echo "$GOG_CTX/Dockerfile: lacks the line: $want"
+			bad=1
+		fi
+	done
+	if ! grep -qF 'find / -xdev -type f -perm /6000 -exec chmod ug-s {} +' "$GOG_CTX/Dockerfile"; then
+		echo "$GOG_CTX/Dockerfile: does not strip setuid and setgid bits"
+		bad=1
+	fi
+	if [ ! -s "$GOG_CTX/check/mcp.py" ]; then
+		echo "$GOG_CTX: check/mcp.py is missing"
+		bad=1
+	fi
+	return "$bad"
+}
+
+# gogImage runs a built agentry-gog hardened, as the runner will run its MCP
+# server: no network, every capability dropped, no new privileges, a
+# read-only root, the image's own user, GOG_HOME on a tmpfs and the file
+# keyring. It fails unless the user is uid 10001, `gog --version` names
+# source.env's tag and commit, no file is setuid or setgid, no sudo or SSH
+# program is on the PATH, the binary is static, the licence is there, and
+# `gog mcp` answers initialize and tools/list over stdio (check/mcp.py): with
+# no flag, every tool annotated read-only; --allow-write adds tools, none a
+# send; --allow-gmail-send with it adds exactly Gmail's send tools, and
+# without it is refused; and a tool called with nobody signed in answers
+# that there is no account. PLATFORM asks for, and checks, one architecture.
+gogImage() {
+	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id bad=0
+	checkGog || return 1
+	# shellcheck source=/dev/null
+	. "$GOG_CTX/source.env"
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	# shellcheck disable=SC2054 # the commas are the tmpfs mount's options
+	local run=("$runtime" run --rm -i --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /persist/gogcli:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777
+		-e GOG_HOME=/persist/gogcli -e GOG_KEYRING_BACKEND=file -e GOG_KEYRING_PASSWORD=check-only
+		--pids-limit 256 --memory 512m)
+	if [ -n "${PLATFORM:-}" ]; then
+		run+=(--platform "$PLATFORM")
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --entrypoint /bin/uname "$ref" -m </dev/null)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+	id=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u </dev/null)
+	if [ "$id" = 10001 ]; then
+		echo "ok   runs as uid 10001, not root"
+	else
+		echo "FAIL runs as uid '$id', not 10001"
+		bad=1
+	fi
+	got=$("${run[@]}" "$ref" --version </dev/null 2>&1) || got="(failed) $got"
+	if grep -qF "$UPSTREAM_TAG ($UPSTREAM_COMMIT)" <<<"$got"; then
+		echo "ok   gog --version names $UPSTREAM_TAG and $UPSTREAM_COMMIT, with no network and a read-only root"
+	else
+		echo "FAIL gog --version: $got (want $UPSTREAM_TAG ($UPSTREAM_COMMIT))"
+		bad=1
+	fi
+	local suid f
+	if ! suid=$("${run[@]}" --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000 </dev/null); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+	# shellcheck disable=SC2016 # expands in the container's shell
+	if got=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'for c in sudo doas su-exec ssh sshd scp sftp dropbear; do command -v "$c"; done; true' </dev/null) && [ -z "$got" ]; then
+		echo "ok   no sudo or SSH program on the PATH"
+	else
+		echo "FAIL on the PATH: $got"
+		bad=1
+	fi
+	"${run[@]}" --entrypoint /bin/cat "$ref" /usr/local/bin/gog </dev/null >"$out/gog"
+	if file "$out/gog" | grep -q 'static'; then
+		echo "ok   the binary is static"
+	else
+		echo "FAIL the binary is not static: $(file -b "$out/gog")"
+		bad=1
+	fi
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/licenses/gog/LICENSE' </dev/null; then
+		echo "ok   the licence is in /usr/share/licenses/gog"
+	else
+		echo "FAIL /usr/share/licenses/gog/LICENSE is missing"
+		bad=1
+	fi
+
+	# Each mode's tools, sorted bytewise for comm, as `<name> read|change`.
+	local mode mcpbad=0
+	for mode in read write send; do
+		local flags=()
+		case "$mode" in
+		write) flags=(--allow-write) ;;
+		send) flags=(--allow-write --allow-gmail-send) ;;
+		esac
+		if ! timeout 120 python3 -I "$GOG_CTX/check/mcp.py" "${run[@]}" "$ref" mcp "${flags[@]}" >"$out/$mode" 2>"$out/$mode.err"; then
+			echo "FAIL gog mcp ${flags[*]} did not answer over stdio:"
+			sed 's/^/  /' "$out/$mode.err"
+			mcpbad=1
+			continue
+		fi
+		sed -n 's/^tool //p' "$out/$mode" | LC_ALL=C sort >"$out/$mode.tools"
+		cut -d' ' -f1 "$out/$mode.tools" >"$out/$mode.names"
+	done
+	if [ "$mcpbad" = 0 ]; then
+		if grep -qx 'capability tools' "$out/read" && [ -s "$out/read.tools" ]; then
+			echo "ok   gog mcp answers initialize ($(sed -n 's/^protocol //p' "$out/read")) and lists $(wc -l <"$out/read.tools") tools, with no network"
+		else
+			echo "FAIL gog mcp offers no tools"
+			mcpbad=1
+		fi
+		if grep -q ' change$' "$out/read.tools"; then
+			echo "FAIL with no flag, gog mcp lists tools not annotated read-only: $(sed -n 's/ change$//p' "$out/read.tools" | tr '\n' ' ')"
+			mcpbad=1
+		else
+			echo "ok   with no flag, every tool is annotated read-only"
+		fi
+		local added
+		added=$(LC_ALL=C comm -13 "$out/read.names" "$out/write.names")
+		if [ -n "$(LC_ALL=C comm -23 "$out/read.names" "$out/write.names")" ] || [ -z "$added" ] || grep -q send <<<"$added"; then
+			echo "FAIL --allow-write does not add tools to the read-only set, or adds a send tool"
+			mcpbad=1
+		else
+			echo "ok   --allow-write adds $(wc -l <<<"$added") tools, none a send"
+		fi
+		added=$(LC_ALL=C comm -13 "$out/write.names" "$out/send.names")
+		if [ -n "$(LC_ALL=C comm -23 "$out/write.names" "$out/send.names")" ] || [ -z "$added" ] || grep -qv '^gmail_send_' <<<"$added"; then
+			echo "FAIL --allow-gmail-send does not add exactly Gmail's send tools"
+			mcpbad=1
+		else
+			echo "ok   --allow-gmail-send adds $(tr '\n' ' ' <<<"$added")"
+		fi
+		if grep -q '^call-error .*account' "$out/read"; then
+			echo "ok   a tool called with nobody signed in answers that there is no account"
+		else
+			echo "FAIL a tool called with nobody signed in did not answer that there is no account: $(grep '^call-' "$out/read")"
+			mcpbad=1
+		fi
+	fi
+	if timeout 120 python3 -I "$GOG_CTX/check/mcp.py" "${run[@]}" "$ref" mcp --allow-gmail-send >/dev/null 2>&1; then
+		echo "FAIL gog mcp --allow-gmail-send starts without --allow-write"
+		mcpbad=1
+	else
+		echo "ok   gog mcp refuses --allow-gmail-send without --allow-write"
+	fi
+	[ "$mcpbad" = 0 ] || bad=1
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder; do
+	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder checkGog; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -2234,6 +2482,11 @@ codersetuid checkCoder
 codertoolchain checkCoder
 coderindex checkCoder
 codertrusted checkCoder
+coderbinsha checkCoder
+coderfetch checkCoder
+gogcommit checkGog
+gogcgo checkGog
+gogroot checkGog
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -2293,6 +2546,11 @@ breakCase() {
 	codertoolchain) sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/' build/agentry-coder/Dockerfile ;;
 	coderindex) sed -i 's/ | sha256sum -c - || refuse "\$f is not/ | true || refuse "$f is not/' build/agentry-coder/install.sh ;;
 	codertrusted) sed -i '0,/^Signed-By: .*/s//Trusted: yes/' build/agentry-coder/install.sh ;;
+	coderbinsha) sed -i 's/^GLAB_SHA256_ARM64=.*/GLAB_SHA256_ARM64=latest/' build/agentry-coder/source.env ;;
+	gogcommit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=main/' build/gog/source.env ;;
+	gogcgo) sed -i 's/^ENV CGO_ENABLED=0 \\$/ENV CGO_ENABLED=1 \\/' build/gog/Dockerfile ;;
+	gogroot) sed -i '/^USER gog$/d' build/gog/Dockerfile ;;
+	coderfetch) sed -i 's/ | sha256sum -c - || refuse "\$1 is not/ | true || refuse "$1 is not/' build/agentry-coder/install.sh ;;
 	esac
 }
 
@@ -2382,6 +2640,13 @@ case "${1:-}" in
 	}
 	coderImage "$2"
 	;;
+--gog-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --gog-image <ref>" >&2
+		exit 2
+	}
+	gogImage "$2"
+	;;
 --ripgrep-image)
 	[ $# -eq 2 ] || {
 		echo "usage: scripts/check.sh --ripgrep-image <ref>" >&2
@@ -2398,7 +2663,7 @@ case "${1:-}" in
 	;;
 '') runAll ;;
 *)
-	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --docker-agent-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --coder-image <ref> | --clamav-db <dir> <files-ref>]" >&2
+	echo "usage: scripts/check.sh [--self-test | --unsafe-image <ref> | --files-image <ref> | --typst-image <ref> | --codex-image <ref> | --hostlink-image <ref> | --docker-agent-image <ref> | --ripgrep-image <ref> | --browser-image <ref> | --coder-image <ref> | --gog-image <ref> | --clamav-db <dir> <files-ref>]" >&2
 	exit 2
 	;;
 esac

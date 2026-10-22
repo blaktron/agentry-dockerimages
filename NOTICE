@@ -46,6 +46,22 @@ Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
 upstream component.
 
+### gog
+
+    Upstream:   https://github.com/openclaw/gogcli
+    Commit:     e0e3cb9c80eb4f1fb8051766e52841b8cd7ab965  (tag v0.46.0)
+    Licence:    MIT
+    Our image:  agentry-gog
+    Context:    build/gog/
+
+Copyright the gogcli authors, under the MIT licence; the licence is in the
+image at `/usr/share/licenses/gog/LICENSE`. No source file is changed. The
+build uses our digest-pinned Go and Alpine mirrors instead of upstream's
+bases, the project's release build settings and its version ldflags
+(`build/gog/Dockerfile` lists the differences from upstream's Dockerfile).
+The Alpine packages in the image (`ca-certificates`, `tzdata` and the base's
+own) keep their licences.
+
 ### Typst
 
     Upstream:   https://github.com/typst/typst
@@ -365,6 +381,16 @@ The Coding agent's toolchain image. What is in it, and under which terms:
   licences in its folder; their `LICENSE` files are at
   `/usr/share/licenses/agentry-coder/node/LICENSE` and
   `/usr/share/licenses/agentry-coder/npm/LICENSE`.
+- Five release binaries, each its project's own static build for the
+  architecture, unchanged, at the versions `build/agentry-coder/source.env`
+  pins, with each project's `LICENSE` at
+  `/usr/share/licenses/agentry-coder/<tool>/LICENSE`:
+  - **gh**, GitHub's CLI (https://github.com/cli/cli): MIT.
+  - **glab**, GitLab's CLI (https://gitlab.com/gitlab-org/cli): MIT.
+  - **tea**, Gitea's CLI (https://gitea.com/gitea/tea): MIT.
+  - **osv-scanner**, Google's OSV-Scanner (https://github.com/google/osv-scanner):
+    Apache-2.0. Upstream carries no `NOTICE` file.
+  - **gitleaks** (https://github.com/gitleaks/gitleaks): MIT.
 
 What we add is ours, under MIT: the tool and package record under
 `/etc/agentry/coder/`, and the coder user.

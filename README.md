@@ -52,7 +52,8 @@ list. Built images are listed with what they are built from.
 | `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
-| `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
+| `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
+| `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
@@ -61,8 +62,8 @@ Mirrors used only as bases when building:
 | Image | Source | Used by |
 |---|---|---|
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
-| `agentry-harness-alpine` | `alpine:3.23` | `build/docker-agent/`: runtime base. |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | `build/docker-agent/`: compiler. |
+| `agentry-harness-alpine` | `alpine:3.23` | `build/docker-agent/` and `build/gog/`: runtime base. |
+| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | `build/docker-agent/` and `build/gog/`: compiler. |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
@@ -214,7 +215,7 @@ moved tags, mirrors every `mirror` row (or the named ones) and builds every
 context that has no `PLATFORMS`.
 
 Each built image that has `PLATFORMS` has a workflow of its own: `unsafe-kali`,
-`files`, `typst`, `codex`, `hostlink`, `ripgrep`, `browser` and `coder`. They are
+`files`, `typst`, `codex`, `hostlink`, `ripgrep`, `browser`, `coder`, `docker-agent` and `gog`. They are
 dispatched by hand and refuse to run from any branch but `main`. Each:
 
 - mirrors its build-time base by digest, so the package exists and is public
@@ -233,7 +234,7 @@ sign the joined digest with cosign, keyless, as the workflow itself
 print the verify command in the run's summary.
 
 Verify a published digest, with the workflow named for the image (`files`,
-`typst`, `codex`, `hostlink`, `ripgrep`, `browser` or `coder`):
+`typst`, `codex`, `hostlink`, `ripgrep`, `browser`, `coder`, `docker-agent` or `gog`):
 
 ```
 cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
@@ -431,7 +432,17 @@ mounts are the runner's settings. It holds:
 - Go, the Go project's release, in `/usr/local/go`, from the
   `golang:1.27.3-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
   asks for a newer Go fails instead of downloading a toolchain;
-- Node 24 and npm, from the `node:24-bookworm-slim` mirror.
+- Node 24 and npm, from the `node:24-bookworm-slim` mirror;
+- in `/usr/local/bin`, five release binaries, each its project's static
+  build, fetched over https and held to the SHA-256 that `source.env` pins
+  for each architecture: `gh` (GitHub), `glab` (GitLab) and `tea` (Gitea),
+  for the git hosts a person gives the agent an account on, and the scanners
+  `osv-scanner` (known vulnerabilities in a project's dependencies, against a
+  database fetched for it) and `gitleaks` (secrets in a tree or a history).
+  `gh` and `glab` are told not to send usage reports or look for updates
+  (`GH_TELEMETRY=false`, `GH_NO_UPDATE_NOTIFIER`,
+  `GH_NO_EXTENSION_UPDATE_NOTIFIER`, `GLAB_SEND_TELEMETRY=false`,
+  `GLAB_CHECK_UPDATE=false`).
 
 Python packages install into a virtual environment (`python3 -m venv`):
 Debian marks its own Python as externally managed. There is no `sudo` and no
@@ -442,14 +453,25 @@ one; with no setuid file, the base's `su` cannot change user.
 It runs as uid 10001 (`coder`) in `/home/coder`, with no setuid or setgid file.
 Debian package versions are recorded in `/etc/agentry/coder/packages`, each
 tool's version and the snapshot in `/etc/agentry/coder/record`, Go's, Node's
-and npm's licences in `/usr/share/licenses/agentry-coder`.
+and npm's licences and each release binary's in
+`/usr/share/licenses/agentry-coder`.
 
 To bump Go: mirror the new `golang:<version>-trixie` (a row in `images.tsv`),
 then set `GO_IMAGE` in `bases.env` and `GO_VERSION` in `source.env`. To move
 the Debian packages: pick a snapshot.debian.org timestamp and set
 `DEBIAN_SNAPSHOT` and the SHA-256 of the `InRelease` of `trixie`,
-`trixie-updates` and `trixie-security` at it. Then run `--coder-image` on a
-local build and dispatch the `coder` workflow from `main`.
+`trixie-updates` and `trixie-security` at it. To move a release binary: set
+its version and both architectures' SHA-256 in `source.env`, after checking
+each download against what its project publishes: `gh` against its
+`checksums.txt` and its GitHub artifact attestation (`gh attestation verify
+<file> --repo cli/cli`), `osv-scanner` against its `SHA256SUMS` and its SLSA
+provenance (`slsa-verifier verify-artifact <file> --provenance-path
+multiple.intoto.jsonl --source-uri github.com/google/osv-scanner
+--source-tag v<version>`), and `glab`, `tea` and `gitleaks` against the
+checksums their releases publish (they sign nothing). `tea` and
+`osv-scanner` ship no licence beside the binary, so their `LICENSE` at the
+release's tag is pinned too. Then run `--coder-image` on a local build and
+dispatch the `coder` workflow from `main`.
 
 ### agentry-docker-agent-src
 
@@ -468,6 +490,35 @@ hardened (`scripts/check.sh --docker-agent-image`), joins the two into one tag
 (`<upstream version>-<UTC date>.<run number>`), signs that digest keyless and
 prints the `images.tsv` row. It needs several GB of free disk per
 architecture.
+
+### agentry-gog
+
+`build/gog/` builds [gog](https://github.com/openclaw/gogcli) from the commit
+in `source.env`, for the Google Workspace MCP server: `gog mcp` serves Gmail,
+Drive, Docs, Sheets and Calendar's events over stdio, reading only unless it
+is started with `--allow-write`, and sending mail only with
+`--allow-gmail-send` too. It is built rather than mirrored because gog's own
+image is amd64 only and unsigned, and its Linux release binaries carry
+checksums and no signature. `build/gog/Dockerfile` lists how it differs
+from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.23
+mirrors, the project's release build settings (CGO off, `-trimpath`,
+`GOTOOLCHAIN=local`, module sums verified), keeps its licence at
+`/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits, and
+otherwise matches upstream: uid 10001 (`gog`), `/persist/gogcli` for its
+documented `GOG_HOME`, and `gog` as the entrypoint.
+
+`scripts/check.sh --gog-image <ref>` runs it with no network and a read-only
+root, `GOG_HOME` on a tmpfs and the file keyring, and drives `gog mcp` over
+stdio with `build/gog/check/mcp.py`: every tool reads with no flag,
+`--allow-write` adds tools and no send, `--allow-gmail-send` adds the send
+tools, and a call with nobody signed in is an error. The `gog` workflow
+builds amd64 and arm64 natively, checks each, joins them into one tag
+(`<upstream version>-<UTC date>.<run number>`), signs that digest keyless and
+prints the `images.tsv` row. To move it: set the commit and tag in
+`source.env`, compare the project's Dockerfile at that commit with the
+differences `build/gog/Dockerfile` lists, run `govulncheck ./...` over the
+source, then `--gog-image` on a
+local build, and dispatch the workflow from `main`.
 
 ### agentry-typst
 

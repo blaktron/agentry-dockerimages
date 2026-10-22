@@ -1,6 +1,7 @@
 # Build, check, sign and publish agentry-coder, the Coding agent's toolchain
-# image: Debian 13's build tools and Python, Go and Node with npm, on our
-# debian:trixie-slim mirror, to ghcr.io/blaktron.
+# image: Debian 13's build tools and Python, Go and Node with npm, the git
+# hosts' CLIs and two scanners, on our debian:trixie-slim mirror, to
+# ghcr.io/blaktron.
 #
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
@@ -11,10 +12,11 @@
 # The Debian packages come from snapshot.debian.org at source.env's
 # timestamp, its signed indexes held to their SHA-256; Go from our
 # golang:1.27.3-trixie mirror and Node and npm from our node:24-bookworm-slim
-# mirror, each held to source.env. Those fetches happen here, once, and never
-# inside a person's run. The base mirrors (agentry-debian,
-# agentry-golang-trixie, agentry-node-bookworm) must exist first: the images
-# workflow mirrors the named rows.
+# mirror, each held to source.env; gh, glab, tea, osv-scanner and gitleaks
+# from their projects' releases, each held to its SHA-256 in source.env.
+# Those fetches happen here, once, and never inside a person's run. The base
+# mirrors (agentry-debian, agentry-golang-trixie, agentry-node-bookworm) must
+# exist first: the images workflow mirrors the named rows.
 #
 # Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
 # ubuntu-24.04-arm, and run hardened with no network (scripts/check.sh
@@ -202,7 +204,7 @@ jobs:
           # shellcheck source=/dev/null
           . build/agentry-coder/source.env
           row=$(printf 'agentry-coder\tghcr.io/blaktron/agentry-coder:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the Coding agent's toolchain image: Debian 13's build-essential, cmake, pkg-config, git, curl and Python 3 with pip and venv (snapshot $DEBIAN_SNAPSHOT), Go $GO_VERSION and Node $NODE_MAJOR with npm, on our debian:trixie-slim mirror, uid 10001, no setuid file, no sudo or SSH, amd64 and arm64, signed keyless by the coder workflow (agentry-cli images.coder)")
+            "the Coding agent's toolchain image: Debian 13's build-essential, cmake, pkg-config, git, curl and Python 3 with pip and venv (snapshot $DEBIAN_SNAPSHOT), Go $GO_VERSION and Node $NODE_MAJOR with npm, gh $GH_VERSION, glab $GLAB_VERSION, tea $TEA_VERSION, osv-scanner $OSV_SCANNER_VERSION and gitleaks $GITLEAKS_VERSION, on our debian:trixie-slim mirror, uid 10001, no setuid file, no sudo or SSH, amd64 and arm64, signed keyless by the coder workflow (agentry-cli images.coder)")
           {
             echo "### agentry-coder:$IMAGE_TAG"
             echo
