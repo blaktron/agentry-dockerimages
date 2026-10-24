@@ -482,8 +482,8 @@ base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
 from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
-linked; and `golang.org/x/net` and otel's `otlptracegrpc` exporter are raised to
-the releases that fix the advisories reported against upstream's pins.
+linked; and otel's `otlptracegrpc` exporter is raised to the release that fixes
+the advisories reported against upstream's pin.
 
 The `docker-agent` workflow builds it natively for amd64 and arm64, runs each
 hardened (`scripts/check.sh --docker-agent-image`), joins the two into one tag

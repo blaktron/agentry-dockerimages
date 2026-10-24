@@ -14,7 +14,7 @@ terms are restated here.
 ### Docker Agent
 
     Upstream:   https://github.com/docker/docker-agent
-    Commit:     5277e7842058fc3fbb9943a6e88bc05a1c8e6fe2  (tag v1.150.0)
+    Commit:     e7f1ec394dfa47aea0b066092a35c72564b192cb  (tag v1.152.0)
     Licence:    Apache-2.0
     Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
@@ -36,10 +36,9 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
 4. The cross-compilation stages (`tonistiigi/xx`, `crazymax/osxcross`, zig, and
    the darwin/windows paths) are dropped; this builds Linux only. The binary is
    still CGO with external linking and still asserted static.
-5. Two dependencies are raised before the build: `golang.org/x/net` from
-   v0.59.0 to v0.61.0 and otel's `otlptracegrpc` exporter from v1.40.0 to
-   v1.45.0, each the first release that fixes advisories reported against
-   upstream's pins. No source file is changed; `go.mod` and `go.sum` in the
+5. otel's `otlptracegrpc` exporter is raised before the build from v1.40.0 to
+   v1.45.0, the first release that fixes advisories reported against
+   upstream's pin. No source file is changed; `go.mod` and `go.sum` in the
    build are, by `go get`.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
@@ -140,7 +139,7 @@ naming them — see each upstream repository.
 | Our image | Upstream | Licence |
 |---|---|---|
 | `agentry-mcp-gateway` | `docker/mcp-gateway:v0.43.3` | see upstream |
-| `agentry-docker-agent` | `docker/docker-agent:1.150.0` | Apache-2.0 |
+| `agentry-docker-agent` | `docker/docker-agent:1.152.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
 | `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | see upstream (Go: BSD-3; Alpine: MIT) |
