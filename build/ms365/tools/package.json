@@ -1,0 +1,8 @@
+{
+  "name": "agentry-ms365-generator",
+  "private": true,
+  "description": "The code generator the Graph client is built with, pinned.",
+  "dependencies": {
+    "openapi-zod-client": "1.18.3"
+  }
+}

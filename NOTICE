@@ -61,6 +61,27 @@ bases, the project's release build settings and its version ldflags
 The Alpine packages in the image (`ca-certificates`, `tzdata` and the base's
 own) keep their licences.
 
+### ms-365-mcp-server
+
+    Upstream:   https://github.com/Softeria/ms-365-mcp-server
+    Commit:     8eab9d6e833ce0e476ea4e9d345b714630e6d14f  (tag v0.171.0)
+    Licence:    MIT
+    Our image:  agentry-ms365
+    Context:    build/ms365/
+
+Copyright Softeria and the ms-365-mcp-server contributors, under the MIT
+licence; the licence is in the image at
+`/usr/share/licenses/ms-365-mcp-server/LICENSE`. Two source files are changed
+at build time: `src/server.ts`, so the six account tools are registered in
+stdio mode only with `--enable-auth-tools`, and
+`bin/modules/generate-mcp-tools.mjs`, so the generator runs our pinned
+openapi-zod-client; `package.json` is given the release's version. The build
+uses our digest-pinned Node mirror instead of upstream's base, Microsoft
+Graph's OpenAPI documents from msgraph-metadata (MIT) at a pinned commit, and
+adds `/opt/agentry/cache-wrap`, our own (`build/ms365/Dockerfile` lists every
+difference from upstream's Dockerfile). The npm packages in the image keep
+their licences.
+
 ### Typst
 
     Upstream:   https://github.com/typst/typst
