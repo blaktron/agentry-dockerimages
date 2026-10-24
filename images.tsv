@@ -16,7 +16,7 @@
 # The Agentry server's own images (postgres, minio, redis, the edge, authentik,
 # opensearch, secureagentryd) are not listed here.
 agentry-mcp-gateway	docker/mcp-gateway:v0.43.3	sha256:e3ee13818cb067a506c5e9acdb2bb4fe0e601caef7d116fc329755782f1a3cfa	mirror	the tool plane: Docker's MCP gateway, started once per run with --block-network (policy images.gateway)
-agentry-docker-agent	docker/docker-agent:1.150.0	sha256:27b0accfc83a74b03f30ac695a23878f71383106c9dec4d7808c72a4f13d5ee1	mirror	the vendor's harness image, byte for byte, the default before the build from source (agentry-docker-agent-src); kept for comparison and for policies that pin it
+agentry-docker-agent	docker/docker-agent:1.152.0	sha256:dcb5a7091eecd6d0a573a4ae29cb1c5fad41e3fcf8dc53f091e75f70831748d7	mirror	the vendor's harness image, byte for byte, the default before the build from source (agentry-docker-agent-src); kept for comparison and for policies that pin it
 agentry-docker-agent-src	ghcr.io/blaktron/agentry-docker-agent-src:1.150.0-2026.10.22.4	sha256:8a5e058f2fb1284db5ae5a04fb79fd40bd531ad529d6b4f4e16fdb9f5c3b9a2d	build	the default harness, Docker Agent built from its pinned upstream commit (build/docker-agent/), amd64 and arm64, signed keyless by the docker-agent workflow (agentry-cli policy.DefaultHarnessImage)
 agentry-golang-alpine	golang:1.27-alpine	sha256:d530cf60723abf1ffae0cd16bb546b379ec0550d2f3815e5b16ed69dbc00fba4	mirror	builds the local runner image: the GO_IMAGE build-arg of runnerimage/Dockerfile (policy images.goBuilder)
 agentry-alpine	alpine:3.22	sha256:d406446bc05b82480756ce8f1287964d28768c23955fa9480d2a74a2eae7a654	mirror	the runner image's runtime base: the FROM of runnerimage/Dockerfile's second stage
