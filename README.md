@@ -54,6 +54,7 @@ list. Built images are listed with what they are built from.
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
+| `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
 | `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
@@ -519,6 +520,40 @@ prints the `images.tsv` row. To move it: set the commit and tag in
 differences `build/gog/Dockerfile` lists, run `govulncheck ./...` over the
 source, then `--gog-image` on a
 local build, and dispatch the workflow from `main`.
+
+### agentry-ms365
+
+`build/ms365/` builds Softeria's
+[ms-365-mcp-server](https://github.com/Softeria/ms-365-mcp-server) from the
+commit in `source.env`, for the Microsoft 365 and Outlook.com MCP server: mail,
+calendar, contacts and OneDrive over stdio, with the tools each switch allows
+named by `--enabled-tools`. It is built rather than taken from npm or the
+project's image because upstream's build downloads Microsoft Graph's OpenAPI
+documents and its code generator unpinned, so neither can be rebuilt to the
+same bytes, and neither is signed. `build/ms365/Dockerfile` lists how it
+differs from the project's own Dockerfile: the documents pinned by commit and
+sha256, the generator from `build/ms365/tools/`'s lockfile, every `npm ci`
+with scripts off, the account tools left out of stdio mode, the log on `/tmp`
+at level error with the audit log off, and the token cache sealed by
+`/opt/agentry/cache-wrap` (`cache-wrap.mjs`) under the key in
+`MS365_CACHE_KEY`, which refuses to run without one. It runs as uid 10001
+(`ms365`) with its state at `/persist/ms365`.
+
+`scripts/check.sh --ms365-image <ref>` runs it with no network and a
+read-only root and drives it over stdio with `build/ms365/check/mcp.py` for
+each switch combination with the allow-lists in `build/ms365/check/`: read
+only, with changes, with sending. It checks the tools listed, the scopes
+`--list-permissions` asks for, a call with nobody signed in, a start with no
+cache key, and the keeper's sealing. The `ms365` workflow also scans each
+architecture's image with OSV-Scanner against `build/ms365/osv-scanner.toml`,
+which names each known vulnerability in its runtime packages that does not
+reach a stdio server signed in by device code, and why; any other fails the
+build. To move it: set the commit and tag in `source.env`, compare the
+project's Dockerfile at that commit with the differences
+`build/ms365/Dockerfile` lists, re-pin Graph's documents, rebuild
+`tools/package-lock.json` if the generator moves, review `osv-scanner.toml`,
+then run `--ms365-image` on a local build, and dispatch the workflow from
+`main`.
 
 ### agentry-typst
 

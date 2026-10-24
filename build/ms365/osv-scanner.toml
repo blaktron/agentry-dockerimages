@@ -1,0 +1,53 @@
+# Known vulnerabilities in the image's runtime npm packages that do not reach
+# how the runner runs the server: over stdio, with no network of its own but
+# Microsoft's two hosts, signed in by device code. scripts/check.sh's OSV
+# step scans the image with this file, so any other finding fails the build.
+# Each entry says why it does not reach; review them at each upstream move.
+
+[[IgnoredVulns]]
+id = "GHSA-xcx6-jx8p-x3h5"
+reason = "@azure/msal-node: the authorization code flow (acquireTokenByCode); the server never calls it, and signs in by device code"
+
+[[IgnoredVulns]]
+id = "GHSA-22jm-h49p-29qw"
+reason = "@modelcontextprotocol/sdk: the experimental task store; the server creates none"
+
+[[IgnoredVulns]]
+id = "GHSA-46jr-4wx8-v453"
+reason = "@modelcontextprotocol/sdk: validation of one HTTP request; the server runs over stdio, and its one client is the runner's gateway"
+
+[[IgnoredVulns]]
+id = "GHSA-6prh-2h8m-c8cw"
+reason = "@modelcontextprotocol/sdk: the HTTP client transports and OAuth requests; the server uses no MCP client"
+
+[[IgnoredVulns]]
+id = "GHSA-rvq5-wwqv-78pq"
+reason = "@modelcontextprotocol/sdk: server-side bearer authentication over HTTP; the server runs over stdio"
+
+[[IgnoredVulns]]
+id = "GHSA-27r3-jxmh-p828"
+reason = "body-parser: express's HTTP request bodies; express runs only under --http, which the runner never passes"
+
+[[IgnoredVulns]]
+id = "GHSA-rxp7-6hxx-x8q5"
+reason = "ip-address: used by express-rate-limit, which runs only under --http"
+
+[[IgnoredVulns]]
+id = "GHSA-333x-w4r6-6crp"
+reason = "fast-uri: ajv's URI handling with the non-default reference 'suffix' option, which nothing here sets"
+
+[[IgnoredVulns]]
+id = "GHSA-w74x-v6f9-j3xg"
+reason = "fast-uri: a percent-encoded scheme decoded by normalize(); the server builds Graph URLs itself and never normalizes an outside URI with it"
+
+[[IgnoredVulns]]
+id = "GHSA-wjr9-j795-jxcr"
+reason = "fast-uri: WHATWG host canonicalization in ajv's format checks; no schema here checks an outside URI's host, and the server reaches only the hosts the runner allows"
+
+[[IgnoredVulns]]
+id = "GHSA-xhq7-xmqj-769h"
+reason = "fast-uri: dot-segment removal on a relative reference; no relative reference from outside is normalized"
+
+[[IgnoredVulns]]
+id = "GHSA-mrhx-c7xc-m3w5"
+reason = "zod: memory exhausted by a very large array; a tool call's arguments come from the model through the gateway, bounded far below that, and the container's memory is capped"

@@ -68,11 +68,19 @@
 #     the module sums verified, refuse a dynamically linked binary, strip
 #     setuid and setgid bits and run as gog; or the MCP probe is missing
 #     (build/gog).
+#   - the ms365 image's source.env does not pin a 40-hex commit and a
+#     version tag; its Dockerfile does not pin Graph's OpenAPI documents by
+#     commit and sha256, install every package with its scripts off, take the
+#     code generator from its own lockfile, leave the account tools out of
+#     stdio mode, keep the token cache under the cache keeper, log to /tmp at
+#     level error with the audit log off, strip setuid and setgid bits and
+#     run as ms365; or the keeper, the generator's lockfile, the allow-lists
+#     or the MCP probe is missing (build/ms365).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
-# --ripgrep-image, --browser-image, --coder-image and --gog-image mode, which run the image
-# they name.
+# --ripgrep-image, --browser-image, --coder-image, --gog-image and --ms365-image mode, which
+# run the image they name.
 #
 # Usage:
 #   scripts/check.sh              # check this checkout
@@ -210,6 +218,20 @@
 #       no account. Needs
 #       python3, file and timeout. PLATFORM asks for, and checks, one
 #       architecture.
+#   scripts/check.sh --ms365-image <ref>
+#       run a built agentry-ms365 hardened, as the runner runs its MCP
+#       server: no network, every capability dropped, no new privileges, a
+#       read-only root, uid 10001, its state and /tmp on tmpfs mounts, a
+#       cache key. It fails unless --version names source.env's version, no
+#       file is setuid or setgid, no sudo or SSH program is on the PATH, the
+#       licence is there, the server lists exactly the tools of each switch
+#       combination's allow-list in build/ms365/check/ (read only, with
+#       changes, with sending), no account or download tool among them, asks
+#       for Mail.Send with sending alone and for no write scope read only,
+#       answers a tool call with nobody signed in that no one is, does not
+#       start with no cache key, and a cache entry saved through the keeper
+#       reads back and leaves no plaintext on the volume. Needs python3 and
+#       timeout. PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --clamav-db <dir> <files-ref>
 #       the same clamscan check with a real signature database: the
 #       databases freshclam wrote to <dir> (the clamav-db workflow's), read
@@ -2413,9 +2435,247 @@ gogImage() {
 	return "$bad"
 }
 
+MS365_CTX=build/ms365
+
+# checkMs365 holds the ms365 image's context to its pins: source.env names a
+# 40-hex upstream commit, a v-prefixed version tag and the image built per
+# architecture; the Dockerfile pins Graph's two OpenAPI documents by commit
+# and sha256, installs every package with its scripts off, takes the code
+# generator from tools/'s lockfile, leaves the account tools out of stdio
+# mode, keeps the token cache under the cache keeper, logs to /tmp at level
+# error with the audit log off, strips setuid and setgid bits and runs as
+# ms365; the keeper, the generator's lockfile, the three allow-lists and the
+# MCP probe are there.
+checkMs365() {
+	local bad=0
+	(
+		# shellcheck source=/dev/null
+		. "$MS365_CTX/source.env"
+		[[ "${UPSTREAM_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]] || {
+			echo "$MS365_CTX/source.env: UPSTREAM_COMMIT is not a 40-hex commit: ${UPSTREAM_COMMIT:-}"
+			exit 1
+		}
+		[[ "${UPSTREAM_TAG:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+			echo "$MS365_CTX/source.env: UPSTREAM_TAG is not a version tag: ${UPSTREAM_TAG:-}"
+			exit 1
+		}
+		[ "${IMAGE_NAME:-}" = agentry-ms365 ] && [ "${PLATFORMS:-}" = linux/amd64,linux/arm64 ] || {
+			echo "$MS365_CTX/source.env: want IMAGE_NAME=agentry-ms365 and PLATFORMS=linux/amd64,linux/arm64"
+			exit 1
+		}
+	) || bad=1
+	local want
+	# shellcheck disable=SC1003,SC2016 # each trailing backslash is the Dockerfile's line continuation and each $ its own, matched literally
+	for want in '	&& printf '"'"'%s  openapi.yaml\n%s  openapi-beta.yaml\n'"'"' "$GRAPH_V1_SHA256" "$GRAPH_BETA_SHA256" | sha256sum -c -' \
+		'RUN npm ci --ignore-scripts --no-audit --no-fund' \
+		'	&& grep -qF '"'"'const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);'"'"' src/server.ts \' \
+		'	&& ! grep -qF '"'"'npx -y openapi-zod-client'"'"' bin/modules/generate-mcp-tools.mjs \' \
+		'	MS365_MCP_AUTH_CACHE_COMMAND=/opt/agentry/cache-wrap \' \
+		'	MS365_MCP_USE_KEYTAR=0 \' \
+		'	MS365_MCP_LOG_DIR=/tmp/ms365-logs \' \
+		'	LOG_LEVEL=error \' \
+		'	MS365_MCP_AUDIT_LOG=false' \
+		'USER ms365'; do
+		if ! grep -qxF -- "$want" "$MS365_CTX/Dockerfile"; then
+			echo "$MS365_CTX/Dockerfile: lacks the line: $want"
+			bad=1
+		fi
+	done
+	if ! grep -qE '^ARG GRAPH_METADATA_COMMIT=[0-9a-f]{40}$' "$MS365_CTX/Dockerfile" ||
+		[ "$(grep -cE '^ARG GRAPH_(V1|BETA)_SHA256=[0-9a-f]{64}$' "$MS365_CTX/Dockerfile")" != 2 ]; then
+		echo "$MS365_CTX/Dockerfile: Graph's OpenAPI documents are not pinned by a 40-hex commit and two sha256s"
+		bad=1
+	fi
+	if ! grep -qF 'find / -xdev -type f -perm /6000 -exec chmod ug-s {} +' "$MS365_CTX/Dockerfile"; then
+		echo "$MS365_CTX/Dockerfile: does not strip setuid and setgid bits"
+		bad=1
+	fi
+	local f
+	for f in cache-wrap.mjs tools/package.json tools/package-lock.json check/mcp.py check/read.re check/chg.re check/snd.re; do
+		if [ ! -s "$MS365_CTX/$f" ]; then
+			echo "$MS365_CTX: $f is missing"
+			bad=1
+		fi
+	done
+	return "$bad"
+}
+
+# ms365Image runs a built agentry-ms365 hardened, as the runner will run its
+# MCP server: no network, every capability dropped, no new privileges, a
+# read-only root, the image's own user, its state on a tmpfs, /tmp a tmpfs,
+# and a cache key. It fails unless the user is uid 10001, --version names
+# source.env's version, no file is setuid or setgid, no sudo or SSH program is
+# on the PATH and the licence is there; the server answers initialize and
+# tools/list over stdio (check/mcp.py) for each switch combination with its
+# allow-list (read only, with changes, with sending) and lists exactly the
+# tools the list names, no account tool among them and no download tool;
+# --list-permissions asks for Mail.Send with sending alone and for no write
+# scope read-only; a tool called with nobody signed in answers that no one
+# is; with no key the server does not start; and a cache entry saved through
+# the keeper reads back and leaves no plaintext on the volume.
+# PLATFORM asks for, and checks, one architecture.
+ms365Image() {
+	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id key bad=0
+	checkMs365 || return 1
+	# shellcheck source=/dev/null
+	. "$MS365_CTX/source.env"
+	out=$(mktemp -d)
+	# shellcheck disable=SC2064 # expand now: out is local
+	trap "rm -rf '$out'" EXIT
+	key=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+	# shellcheck disable=SC2054 # the commas are the tmpfs mount's options
+	local run=("$runtime" run --rm -i --network none --cap-drop ALL
+		--security-opt no-new-privileges --security-opt label=disable --read-only
+		--tmpfs /persist/ms365:uid=10001,gid=10001,mode=0700 --tmpfs /tmp:mode=1777
+		--pids-limit 256 --memory 512m)
+	local keyed=("${run[@]}" -e "MS365_CACHE_KEY=$key")
+	if [ -n "${PLATFORM:-}" ]; then
+		run+=(--platform "$PLATFORM")
+		keyed+=(--platform "$PLATFORM")
+		want="${PLATFORM##*/}"
+		arch=$("${run[@]}" --entrypoint /bin/uname "$ref" -m </dev/null)
+		case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+		if [ "$arch" != "$want" ]; then
+			echo "FAIL $ref runs as $arch, not $want"
+			return 1
+		fi
+		echo "ok   architecture $arch"
+	fi
+	id=$("${run[@]}" --entrypoint /usr/bin/id "$ref" -u </dev/null)
+	if [ "$id" = 10001 ]; then
+		echo "ok   runs as uid 10001, not root"
+	else
+		echo "FAIL runs as uid '$id', not 10001"
+		bad=1
+	fi
+	got=$("${keyed[@]}" "$ref" --version </dev/null 2>&1) || got="(failed) $got"
+	if [ "$(tail -n 1 <<<"$got")" = "${UPSTREAM_TAG#v}" ]; then
+		echo "ok   --version names ${UPSTREAM_TAG#v}, with no network and a read-only root"
+	else
+		echo "FAIL --version: $got (want ${UPSTREAM_TAG#v})"
+		bad=1
+	fi
+	local suid
+	if ! suid=$("${run[@]}" --user 0:0 --entrypoint /usr/bin/find "$ref" / -xdev -type f -perm /6000 </dev/null); then
+		echo "FAIL the setuid and setgid scan did not finish"
+		bad=1
+	elif [ -n "$suid" ]; then
+		echo "FAIL a setuid or setgid file in the image:"
+		while IFS= read -r f; do echo "  $f"; done <<<"$suid"
+		bad=1
+	else
+		echo "ok   no setuid or setgid file"
+	fi
+	# shellcheck disable=SC2016 # expands in the container's shell
+	if got=$("${run[@]}" --entrypoint /bin/sh "$ref" -c 'for c in sudo doas su-exec ssh sshd scp sftp dropbear; do command -v "$c"; done; true' </dev/null) && [ -z "$got" ]; then
+		echo "ok   no sudo or SSH program on the PATH"
+	else
+		echo "FAIL on the PATH: $got"
+		bad=1
+	fi
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/licenses/ms-365-mcp-server/LICENSE' </dev/null; then
+		echo "ok   the licence is in /usr/share/licenses/ms-365-mcp-server"
+	else
+		echo "FAIL /usr/share/licenses/ms-365-mcp-server/LICENSE is missing"
+		bad=1
+	fi
+
+	# Each switch combination's allow-list, as the CLI gives it.
+	local read chg snd mode
+	read=$(tr -d '\n' <"$MS365_CTX/check/read.re")
+	chg=$(tr -d '\n' <"$MS365_CTX/check/chg.re")
+	snd=$(tr -d '\n' <"$MS365_CTX/check/snd.re")
+	for mode in read chg snd; do
+		local flags=() list
+		case "$mode" in
+		read) flags=(--read-only --enabled-tools "^($read)\$") list="$read" ;;
+		chg) flags=(--enabled-tools "^($read|$chg)\$") list="$read|$chg" ;;
+		snd) flags=(--enabled-tools "^($read|$chg|$snd)\$") list="$read|$chg|$snd" ;;
+		esac
+		tr '|' '\n' <<<"$list" | LC_ALL=C sort >"$out/$mode.want"
+		if ! timeout 120 python3 -I "$MS365_CTX/check/mcp.py" "${keyed[@]}" "$ref" "${flags[@]}" >"$out/$mode" 2>"$out/$mode.err"; then
+			echo "FAIL the server (${mode}) did not answer over stdio:"
+			sed 's/^/  /' "$out/$mode.err"
+			bad=1
+			continue
+		fi
+		sed -n 's/^tool \([^ ]*\) .*/\1/p' "$out/$mode" | LC_ALL=C sort >"$out/$mode.names"
+		if cmp -s "$out/$mode.want" "$out/$mode.names"; then
+			echo "ok   ${mode}: lists exactly the $(wc -l <"$out/$mode.names") tools of its allow-list"
+		else
+			echo "FAIL ${mode}: the tools listed are not the allow-list's:"
+			diff "$out/$mode.want" "$out/$mode.names" | sed 's/^/  /'
+			bad=1
+		fi
+		if grep -qxE 'login|logout|verify-login|list-accounts|select-account|remove-account|download-bytes|download-bytes-to-file|get-download-url' "$out/$mode.names"; then
+			echo "FAIL ${mode}: an account or download tool is listed"
+			bad=1
+		fi
+		if ! "${keyed[@]}" "$ref" "${flags[@]}" --list-permissions </dev/null >"$out/$mode.perm" 2>"$out/$mode.perm.err" ||
+			! python3 -I -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["permissions"]))' "$out/$mode.perm" >"$out/$mode.scopes" 2>/dev/null; then
+			echo "FAIL ${mode}: --list-permissions did not answer"
+			bad=1
+			continue
+		fi
+		case "$mode" in
+		read)
+			if grep -q 'Write\|Send' "$out/$mode.scopes"; then
+				echo "FAIL read only, it asks for: $(tr '\n' ' ' <"$out/$mode.scopes")"
+				bad=1
+			else
+				echo "ok   read only, it asks for $(tr '\n' ' ' <"$out/$mode.scopes")"
+			fi
+			;;
+		chg)
+			if grep -qx 'Mail.Send' "$out/$mode.scopes" || ! grep -qx 'Mail.ReadWrite' "$out/$mode.scopes"; then
+				echo "FAIL with changes, it asks for: $(tr '\n' ' ' <"$out/$mode.scopes")"
+				bad=1
+			else
+				echo "ok   with changes, it asks for $(tr '\n' ' ' <"$out/$mode.scopes")"
+			fi
+			;;
+		snd)
+			if grep -qx 'Mail.Send' "$out/$mode.scopes"; then
+				echo "ok   with sending, it asks for Mail.Send too"
+			else
+				echo "FAIL with sending, it does not ask for Mail.Send"
+				bad=1
+			fi
+			;;
+		esac
+	done
+	if grep -q '^call-error .*No accounts found' "$out/read" 2>/dev/null; then
+		echo "ok   a tool called with nobody signed in answers that no one is"
+	else
+		echo "FAIL a tool called with nobody signed in: $(grep '^call' "$out/read" 2>/dev/null || echo 'no call')"
+		bad=1
+	fi
+	if timeout 60 python3 -I "$MS365_CTX/check/mcp.py" "${run[@]}" "$ref" --read-only --enabled-tools "^($read)\$" >"$out/nokey" 2>&1 &&
+		! grep -q '^call-error .*Auth cache command failed' "$out/nokey"; then
+		echo "FAIL with no cache key, the server answered as if it could keep a sign-in"
+		bad=1
+	else
+		echo "ok   with no cache key, the server cannot keep a sign-in"
+	fi
+	# shellcheck disable=SC2016 # expands in the container's shell
+	got=$("${keyed[@]}" --entrypoint /bin/sh "$ref" -c '
+		printf "{\"value\":\"cache-check-plaintext-0123456789\"}" | /opt/agentry/cache-wrap save token-cache || exit 1
+		/opt/agentry/cache-wrap load token-cache || exit 1
+		echo
+		if grep -rqF cache-check-plaintext /persist/ms365; then echo plaintext; fi
+		MS365_CACHE_KEY= /opt/agentry/cache-wrap load token-cache 2>/dev/null; echo "nokey $?"' </dev/null 2>&1)
+	if grep -qF '"value":"cache-check-plaintext-0123456789"' <<<"$got" && ! grep -qx plaintext <<<"$got" && grep -qx 'nokey 3' <<<"$got"; then
+		echo "ok   the cache keeper seals what it saves, reads it back, and refuses to run with no key"
+	else
+		echo "FAIL the cache keeper: $got"
+		bad=1
+	fi
+	return "$bad"
+}
+
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder checkGog; do
+	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder checkGog checkMs365; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -2487,6 +2747,11 @@ coderfetch checkCoder
 gogcommit checkGog
 gogcgo checkGog
 gogroot checkGog
+ms365commit checkMs365
+ms365scripts checkMs365
+ms365authtools checkMs365
+ms365openapi checkMs365
+ms365root checkMs365
 "
 
 # The shellcheck case appends a literal unexpanded variable on purpose.
@@ -2550,6 +2815,11 @@ breakCase() {
 	gogcommit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=main/' build/gog/source.env ;;
 	gogcgo) sed -i 's/^ENV CGO_ENABLED=0 \\$/ENV CGO_ENABLED=1 \\/' build/gog/Dockerfile ;;
 	gogroot) sed -i '/^USER gog$/d' build/gog/Dockerfile ;;
+	ms365commit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=main/' build/ms365/source.env ;;
+	ms365scripts) sed -i 's/^RUN npm ci --ignore-scripts --no-audit --no-fund$/RUN npm ci --no-audit --no-fund/' build/ms365/Dockerfile ;;
+	ms365authtools) sed -i '/const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);. src\/server.ts \\$/d' build/ms365/Dockerfile ;;
+	ms365openapi) sed -i 's/^ARG GRAPH_METADATA_COMMIT=.*/ARG GRAPH_METADATA_COMMIT=master/' build/ms365/Dockerfile ;;
+	ms365root) sed -i '/^USER ms365$/d' build/ms365/Dockerfile ;;
 	coderfetch) sed -i 's/ | sha256sum -c - || refuse "\$1 is not/ | true || refuse "$1 is not/' build/agentry-coder/install.sh ;;
 	esac
 }
@@ -2646,6 +2916,13 @@ case "${1:-}" in
 		exit 2
 	}
 	gogImage "$2"
+	;;
+--ms365-image)
+	[ $# -eq 2 ] || {
+		echo "usage: scripts/check.sh --ms365-image <ref>" >&2
+		exit 2
+	}
+	ms365Image "$2"
 	;;
 --ripgrep-image)
 	[ $# -eq 2 ] || {
