@@ -38,8 +38,17 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    still CGO with external linking and still asserted static.
 5. otel's `otlptracegrpc` exporter is raised before the build from v1.40.0 to
    v1.45.0, the first release that fixes advisories reported against
-   upstream's pin. No source file is changed; `go.mod` and `go.sum` in the
-   build are, by `go get`.
+   upstream's pin. `go.mod` and `go.sum` in the build are changed by `go get`.
+6. `build/docker-agent/cold-cache-clear.patch` is applied before the build. It
+   adds the agent setting `cold_cache_clear`, which replaces old tool results
+   in the history sent to the model with a placeholder after the provider's
+   prompt cache has expired. It changes `pkg/agent/agent.go`,
+   `pkg/agent/opts.go`, `pkg/config/latest/types.go`,
+   `pkg/config/latest/validate.go`, `pkg/runtime/loop.go`,
+   `pkg/session/session.go` and `pkg/teamloader/teamloader.go`, each marked
+   where it changes them, and adds five files of its own under `pkg/session`,
+   `pkg/runtime` and `pkg/config/latest`, each headed as not part of upstream.
+   The image keeps the patch at `/usr/share/doc/docker-agent/`.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
