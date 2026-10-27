@@ -24,10 +24,10 @@ index 06001c3..424bf53 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index 528aebc..1206e2e 100644
+index 528aebc..a6c569b 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -254,6 +254,35 @@ func WithMaxToolResultTokens(n int) Opt {
+@@ -254,6 +254,42 @@ func WithMaxToolResultTokens(n int) Opt {
  	}
  }
  
@@ -41,6 +41,13 @@ index 528aebc..1206e2e 100644
 +	BrowserTools []string
 +}
 +
++// The turns and browser results a cold-cache clear keeps whole when its
++// config does not say.
++const (
++	DefaultColdClearKeepTurns   = 2
++	DefaultColdClearKeepBrowser = 2
++)
++
 +// WithColdCacheClear sets the agent's cold-cache clear from its config; nil
 +// leaves the agent without one.
 +func WithColdCacheClear(c *latest.ColdCacheClearConfig) Opt {
@@ -49,7 +56,7 @@ index 528aebc..1206e2e 100644
 +			a.coldCacheClear = nil
 +			return
 +		}
-+		cc := &ColdCacheClear{After: c.After.Duration, KeepTurns: 2, KeepBrowser: 2, BrowserTools: slices.Clone(c.BrowserTools)}
++		cc := &ColdCacheClear{After: c.After.Duration, KeepTurns: DefaultColdClearKeepTurns, KeepBrowser: DefaultColdClearKeepBrowser, BrowserTools: slices.Clone(c.BrowserTools)}
 +		if c.KeepTurns != nil {
 +			cc.KeepTurns = *c.KeepTurns
 +		}
@@ -123,19 +130,19 @@ index 0000000..c6dff67
 +	}
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index fd20c96..4f19e81 100644
+index fd20c96..ed33918 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
 @@ -533,6 +533,19 @@ type FallbackConfig struct {
  	Cooldown Duration `json:"cooldown"`
  }
  
-+// ColdCacheClearConfig (added by Agentry's build) configures the cold-cache clear: when a turn's first
-+// model request comes more than After since the previous model response
-+// ended, every tool result older than the newest KeepTurns turns before the
-+// current one is replaced by a placeholder that names the call, and so is
-+// every result of a tool in BrowserTools but the newest KeepBrowser.
-+// KeepTurns and KeepBrowser default to 2.
++// ColdCacheClearConfig configures the cold-cache clear (added by Agentry's
++// build): when a turn's first model request comes more than After since the
++// previous model response ended, every tool result older than the newest
++// KeepTurns turns before the current one is replaced by a placeholder that
++// names the call, and so is every result of a tool in BrowserTools but the
++// newest KeepBrowser. KeepTurns and KeepBrowser default to 2.
 +type ColdCacheClearConfig struct {
 +	After        Duration `json:"after" yaml:"after"`
 +	KeepTurns    *int     `json:"keep_turns,omitempty" yaml:"keep_turns,omitempty"`
@@ -146,16 +153,14 @@ index fd20c96..4f19e81 100644
  // Duration is a wrapper around time.Duration that supports YAML/JSON unmarshaling
  // from string format (e.g., "1m", "30s", "2h30m").
  type Duration struct {
-@@ -775,7 +788,11 @@ type AgentConfig struct {
- 	// share the same budget. Tokens are approximated as len/4.
+@@ -776,6 +789,10 @@ type AgentConfig struct {
  	// Disabled by default; only positive values enable the cap.
  	MaxToolResultTokens int `json:"max_tool_result_tokens,omitempty"`
--	NumHistoryItems     int `json:"num_history_items,omitempty"`
-+	// ColdCacheClear (added by Agentry's build) replaces old tool results with a placeholder on the
+ 	NumHistoryItems     int `json:"num_history_items,omitempty"`
++	// ColdCacheClear replaces old tool results with a placeholder on the
 +	// first model request of a turn that starts after the prompt cache has
-+	// expired. Absent, nothing is cleared.
-+	ColdCacheClear  *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`
-+	NumHistoryItems int                   `json:"num_history_items,omitempty"`
++	// expired. Absent, nothing is cleared. Added by Agentry's build.
++	ColdCacheClear *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`
  	// SessionCompaction toggles automatic session compaction for this agent:
  	// the proactive threshold trigger and the post-overflow auto-recovery.
  	// Manual /compact stays available regardless. Pointer (tri-state) so
@@ -201,7 +206,7 @@ index 5535d88..99fe597 100644
  		return nil
 diff --git a/pkg/runtime/coldclear.go b/pkg/runtime/coldclear.go
 new file mode 100644
-index 0000000..eaf9aaf
+index 0000000..170e444
 --- /dev/null
 +++ b/pkg/runtime/coldclear.go
 @@ -0,0 +1,35 @@
@@ -232,7 +237,7 @@ index 0000000..eaf9aaf
 +	if !ok || r.now().Sub(last) <= c.After {
 +		return
 +	}
-+	if !sess.ClearColdToolResults(c.KeepTurns, c.KeepBrowser, c.BrowserTools) {
++	if !sess.ClearColdToolResults(*c) {
 +		return
 +	}
 +	slog.DebugContext(ctx, "Cleared old tool results after a cold cache", "agent", a.Name(), "session_id", sess.ID, "idle", r.now().Sub(last))
@@ -242,10 +247,10 @@ index 0000000..eaf9aaf
 +}
 diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
 new file mode 100644
-index 0000000..fa332c3
+index 0000000..613e68a
 --- /dev/null
 +++ b/pkg/runtime/coldclear_test.go
-@@ -0,0 +1,186 @@
+@@ -0,0 +1,200 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -353,9 +358,23 @@ index 0000000..fa332c3
 +	assert.Equal(t, "contents of a.go", sess.Messages[2].Message.Message.Content)
 +	assert.Equal(t, "old-a.go", sess.AttributesSnapshot()[session.ColdClearedAttribute])
 +	stored, err := rt.SessionStore().GetSession(t.Context(), sess.ID)
-+	if err == nil {
-+		assert.Equal(t, "old-a.go", stored.AttributesSnapshot()[session.ColdClearedAttribute])
-+	}
++	require.NoError(t, err)
++	assert.Equal(t, "old-a.go", stored.AttributesSnapshot()[session.ColdClearedAttribute])
++}
++
++func TestColdCacheClearSkipsASubSession(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	prov := &messageRecordingProvider{id: "test/mock-model"}
++	a := coldClearAgent(prov)
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(a)), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-2 * time.Hour))
++	sess.ParentID = "parent"
++	sess.AddMessage(session.UserMessage("a delegated task"))
++
++	rt.clearColdToolResults(t.Context(), sess, a)
++	assert.NotContains(t, sess.AttributesSnapshot(), session.ColdClearedAttribute)
 +}
 +
 +func TestColdCacheClearNotWhileTheCacheIsWarm(t *testing.T) {
@@ -433,29 +452,27 @@ index 0000000..fa332c3
 +	}
 +}
 diff --git a/pkg/runtime/loop.go b/pkg/runtime/loop.go
-index d56b52e..a075398 100644
+index d56b52e..c94a792 100644
 --- a/pkg/runtime/loop.go
 +++ b/pkg/runtime/loop.go
-@@ -864,6 +864,13 @@ func (r *LocalRuntime) runTurn(
- 		ls.exitReason = endReason
- 	}()
+@@ -488,6 +488,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
+ 		}
+ 	}
  
-+	// A cold-cache clear (added by Agentry's build) runs before the
-+	// stream's first model request only, so it never changes the history
-+	// inside a turn.
-+	if ls.iteration == 1 {
-+		r.clearColdToolResults(ctx, sess, a)
-+	}
++	// A cold-cache clear (added by Agentry's build) runs once per stream,
++	// before its first model request and any compaction, so it never
++	// changes the history inside a turn.
++	r.clearColdToolResults(ctx, sess, a)
 +
- 	// Run turn_start hooks before assembly so dynamic context can be diffed
- 	// against what the model already knows. Changes extend the conversation;
- 	// they never rewrite the frozen instruction prefix.
+ 	sink.Emit(StreamStarted(sess.ID, a.Name()))
+ 
+ 	if a.HasHarness() {
 diff --git a/pkg/session/coldclear.go b/pkg/session/coldclear.go
 new file mode 100644
-index 0000000..416f86e
+index 0000000..c0ef95a
 --- /dev/null
 +++ b/pkg/session/coldclear.go
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,196 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -468,6 +485,7 @@ index 0000000..416f86e
 +	"time"
 +	"unicode/utf8"
 +
++	"github.com/docker/docker-agent/pkg/agent"
 +	"github.com/docker/docker-agent/pkg/chat"
 +	"github.com/docker/docker-agent/pkg/tools"
 +)
@@ -503,12 +521,12 @@ index 0000000..416f86e
 +}
 +
 +// ClearColdToolResults marks for clearing every tool result older than the
-+// newest keepTurns turns before the current one, and every result of a tool
-+// in browserTools but the newest keepBrowser of them, wherever they fall. A
-+// turn begins at a user message the user sent; the newest such message is
++// newest c.KeepTurns turns before the current one, and every result of a tool
++// in c.BrowserTools but the newest c.KeepBrowser of them, wherever they fall.
++// A turn begins at a user message the user sent; the newest such message is
 +// the current turn's, which has no results yet. It reports whether a result
 +// was newly marked; the caller persists the session.
-+func (s *Session) ClearColdToolResults(keepTurns, keepBrowser int, browserTools []string) bool {
++func (s *Session) ClearColdToolResults(c agent.ColdCacheClear) bool {
 +	s.mu.Lock()
 +	defer s.mu.Unlock()
 +
@@ -531,7 +549,7 @@ index 0000000..416f86e
 +		}
 +	}
 +	keepFrom := -1
-+	if n := len(turns) - 1 - keepTurns; n >= 0 {
++	if n := len(turns) - 1 - c.KeepTurns; n >= 0 {
 +		keepFrom = turns[n]
 +	}
 +
@@ -544,12 +562,12 @@ index 0000000..416f86e
 +			continue
 +		}
 +		id := m.Message.ToolCallID
-+		clear := i < keepFrom
-+		if slices.Contains(browserTools, names[id]) {
++		drop := i < keepFrom
++		if slices.Contains(c.BrowserTools, names[id]) {
 +			browser = append(browser, id)
-+			clear = clear || len(browser) > keepBrowser
++			drop = drop || len(browser) > c.KeepBrowser
 +		}
-+		if clear && !cleared[id] {
++		if drop && !cleared[id] {
 +			cleared[id] = true
 +			added = true
 +		}
@@ -607,6 +625,29 @@ index 0000000..416f86e
 +	}
 +}
 +
++// cutArguments cuts args to at most coldClearArgsMax bytes. A cut never ends
++// inside a word: a token split there (a key, an identifier) is dropped whole,
++// so no prefix of it is sent that a redaction pattern for the whole token
++// would not catch.
++func cutArguments(args string) string {
++	if len(args) <= coldClearArgsMax {
++		return args
++	}
++	cut := coldClearArgsMax
++	for cut > 0 && !utf8.RuneStart(args[cut]) {
++		cut--
++	}
++	for cut > 0 && isTokenByte(args[cut-1]) && isTokenByte(args[cut]) {
++		cut--
++	}
++	return args[:cut] + "…"
++}
++
++// isTokenByte reports whether b can be part of a key or an identifier.
++func isTokenByte(b byte) bool {
++	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.IndexByte("_-+/=.", b) >= 0
++}
++
 +// coldClearPlaceholder names the call that produced result and its size,
 +// and says how to get it back. It is built from the stored call alone and
 +// never quotes the result.
@@ -615,14 +656,7 @@ index 0000000..416f86e
 +	if name == "" {
 +		name = "a tool"
 +	}
-+	args := call.Function.Arguments
-+	if len(args) > coldClearArgsMax {
-+		cut := coldClearArgsMax
-+		for cut > 0 && !utf8.RuneStart(args[cut]) {
-+			cut--
-+		}
-+		args = args[:cut] + "…"
-+	}
++	args := cutArguments(call.Function.Arguments)
 +	size := fmt.Sprintf("%d bytes", toolResultTextualBytes(result))
 +	attachments := 0
 +	for _, part := range result.MultiContent {
@@ -637,10 +671,10 @@ index 0000000..416f86e
 +}
 diff --git a/pkg/session/coldclear_test.go b/pkg/session/coldclear_test.go
 new file mode 100644
-index 0000000..bfc393f
+index 0000000..a3b6a68
 --- /dev/null
 +++ b/pkg/session/coldclear_test.go
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,213 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -693,7 +727,7 @@ index 0000000..bfc393f
 +
 +func coldAgent() *agent.Agent { return agent.New("root", "instructions") }
 +
-+var browserTools = []string{"browser_snapshot", "browser_navigate"}
++var coldConfig = agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2, BrowserTools: []string{"browser_snapshot", "browser_navigate"}}
 +
 +func TestColdClearKeepsTheNewestTurnsAndBrowserResults(t *testing.T) {
 +	t.Parallel()
@@ -704,7 +738,7 @@ index 0000000..bfc393f
 +	coldTurn(sess, 4, [2]string{"fs_read", `{"path":"c.go"}`})
 +	sess.AddMessage(UserMessage("the question after the pause"))
 +
-+	require.True(t, sess.ClearColdToolResults(2, 2, browserTools))
++	require.True(t, sess.ClearColdToolResults(coldConfig))
 +	got := toolResults(sess.GetMessages(coldAgent()))
 +
 +	cleared := []string{"t1-0", "t1-1", "t2-0", "t3-0"}
@@ -724,7 +758,7 @@ index 0000000..bfc393f
 +	coldTurn(sess, 1, [2]string{"browser_snapshot", `{}`}, [2]string{"browser_snapshot", `{}`}, [2]string{"browser_snapshot", `{}`})
 +	sess.AddMessage(UserMessage("again"))
 +
-+	require.True(t, sess.ClearColdToolResults(2, 2, browserTools))
++	require.True(t, sess.ClearColdToolResults(coldConfig))
 +	got := toolResults(sess.GetMessages(coldAgent()))
 +	assert.True(t, strings.HasPrefix(got["t1-0"], "[cleared: browser_snapshot({})"))
 +	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-1"])
@@ -738,7 +772,7 @@ index 0000000..bfc393f
 +	sess.AddMessage(UserMessage("again"))
 +	before := sess.GetMessages(coldAgent())
 +
-+	assert.False(t, sess.ClearColdToolResults(2, 2, browserTools))
++	assert.False(t, sess.ClearColdToolResults(coldConfig))
 +	assert.Equal(t, before, sess.GetMessages(coldAgent()))
 +	assert.NotContains(t, sess.AttributesSnapshot(), ColdClearedAttribute)
 +}
@@ -756,7 +790,7 @@ index 0000000..bfc393f
 +	sess.AddMessage(UserMessage("two"))
 +	sess.AddMessage(UserMessage("three"))
 +
-+	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	require.True(t, sess.ClearColdToolResults(agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2}))
 +	for _, m := range sess.GetMessages(coldAgent()) {
 +		if m.Role != chat.MessageRoleTool {
 +			continue
@@ -779,6 +813,22 @@ index 0000000..bfc393f
 +	assert.LessOrEqual(t, len(strings.TrimSuffix(inner, "…")), coldClearArgsMax)
 +}
 +
++func TestColdClearNeverCutsInsideAToken(t *testing.T) {
++	t.Parallel()
++	const secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyz"
++	prefix := `{"note":"` + strings.Repeat("a b ", 44) + `","token":"`
++	require.Less(t, len(prefix), coldClearArgsMax)
++	require.Greater(t, len(prefix)+len(secret), coldClearArgsMax)
++	got := cutArguments(prefix + secret + `"}`)
++	assert.NotContains(t, got, "ghp_")
++	assert.Equal(t, prefix+"…", got)
++
++	// A cut between two words keeps the word before it whole.
++	words := strings.Repeat("word ", 60)
++	got = cutArguments(words)
++	assert.True(t, strings.HasSuffix(got, "word …"), got)
++}
++
 +func TestColdClearIsStableAcrossRequestsReloadsAndCompaction(t *testing.T) {
 +	t.Parallel()
 +	sess := New()
@@ -786,11 +836,11 @@ index 0000000..bfc393f
 +	coldTurn(sess, 2, [2]string{"fs_read", `{"path":"b.go"}`})
 +	coldTurn(sess, 3, [2]string{"fs_read", `{"path":"c.go"}`})
 +	sess.AddMessage(UserMessage("after the pause"))
-+	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	require.True(t, sess.ClearColdToolResults(agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2}))
 +	first := sess.GetMessages(coldAgent())
 +
 +	// A second clear with the same history marks nothing new.
-+	assert.False(t, sess.ClearColdToolResults(2, 2, nil))
++	assert.False(t, sess.ClearColdToolResults(agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2}))
 +	assert.Equal(t, first, sess.GetMessages(coldAgent()))
 +
 +	// A reload of the stored session assembles the same history.
@@ -813,10 +863,10 @@ index 0000000..bfc393f
 +	coldTurn(sess, 2, [2]string{"fs_read", `{"path":"b.go"}`})
 +	coldTurn(sess, 3, [2]string{"fs_read", `{"path":"c.go"}`})
 +	sess.AddMessage(UserMessage("after the first pause"))
-+	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	require.True(t, sess.ClearColdToolResults(agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2}))
 +	coldTurn(sess, 5, [2]string{"fs_read", `{"path":"d.go"}`})
 +	sess.AddMessage(UserMessage("after the second pause"))
-+	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	require.True(t, sess.ClearColdToolResults(agent.ColdCacheClear{KeepTurns: 2, KeepBrowser: 2}))
 +	got := toolResults(sess.GetMessages(coldAgent()))
 +	// The first pause's message began a turn of its own, so turn 3 is
 +	// now older than the two kept.
@@ -839,7 +889,7 @@ index 0000000..bfc393f
 +	assert.Equal(t, coldBase.Add(3*time.Minute), at)
 +}
 diff --git a/pkg/session/session.go b/pkg/session/session.go
-index 4bbd5a6..9fe4540 100644
+index 4bbd5a6..d68ed24 100644
 --- a/pkg/session/session.go
 +++ b/pkg/session/session.go
 @@ -2360,6 +2360,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
@@ -854,7 +904,7 @@ index 4bbd5a6..9fe4540 100644
  	// Take a snapshot of Messages under the lock, copying Message structs
  	// to avoid racing with UpdateMessage which may modify the pointed-to objects.
  	items := s.snapshotItems()
-+	s.applyColdClear(items) // added by Agentry's build: cleared results read as placeholders
++	s.applyColdClear(items)
  	var instructionInitial []chat.Message
  	var instructionUpdates []InstructionUpdate
  	if state != nil {

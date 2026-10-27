@@ -145,7 +145,8 @@
 #       read-only root, the image's own user), and fail unless the user is not
 #       root, `docker-agent version` names source.env's tag and commit,
 #       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
-#       the binary is static, and it links golang.org/x/net v0.60.0 or later.
+#       the binary is static, it carries the cold-cache clear and the image
+#       keeps the patch, and it links golang.org/x/net v0.60.0 or later.
 #       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
 #       run a built agentry-hostlink hardened, as the runner runs a host link

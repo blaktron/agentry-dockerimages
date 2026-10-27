@@ -502,7 +502,8 @@ cleared inside a turn, and an agent without the setting behaves as upstream.
 The image keeps the patch at `/usr/share/doc/docker-agent/`. The patch leaves
 upstream's `agent-schema.json` alone: it is outside the build's context and
 the binary does not read it, so an editor validating an agent file against it
-does not know the setting.
+does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
+`pkg/config` fails on the patched tree for that reason alone.
 
 **Re-porting the patch on a commit bump.** Apply it to the new commit
 (`git apply --3way build/docker-agent/cold-cache-clear.patch` in a clone at
@@ -510,7 +511,7 @@ does not know the setting.
 `go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
 ./pkg/runtime ./pkg/config/latest`. The hooks it needs are the session's two
 history assemblies (`getMessages` and `CompactionInput`), the run loop's first
-model request (`runTurn` at `ls.iteration == 1`), the agent config's latest
+model request (`runStreamLoop`, before its loop), the agent config's latest
 schema and the teamloader's agent options. Write the result back with `git
 diff > cold-cache-clear.patch`. The build applies it with `patch --fuzz=0`, so
 a hunk that moved fails the build rather than landing nearby, and runs its
