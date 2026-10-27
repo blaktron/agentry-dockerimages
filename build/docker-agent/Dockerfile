@@ -30,6 +30,21 @@
 #      govulncheck reports against upstream's pin. `go get` raises only what
 #      that module requires; the build records the result, and
 #      `go version -m /docker-agent` shows it.
+#   6. cold-cache-clear.patch, applied with no fuzz before the build, adds the
+#      agent setting `cold_cache_clear: {after, keep_turns, keep_browser,
+#      browser_tools}`. On the first model request of a turn that starts more
+#      than `after` since the previous model response ended, when the
+#      provider's prompt cache has expired and the history is re-sent uncached
+#      anyway, every tool result older than the newest `keep_turns` turns, and
+#      every result of a tool in `browser_tools` but the newest `keep_browser`,
+#      is sent as a placeholder that names the call and says to call it again.
+#      The stored session keeps the originals and records which results are
+#      cleared, so later requests, a reload and a compaction send the same
+#      bytes. Nothing is cleared inside a turn, and an agent without the
+#      setting is unchanged. The patch's own tests run in the build.
+#
+# The patch's files carry a note that Agentry's build adds or changes them, and
+# the image keeps the patch at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -47,17 +62,28 @@ FROM ${GO_IMAGE} AS builder
 # CGO needs a C compiler and the Go alpine images ship none. Upstream uses zig
 # from its xx toolchain; without xx, gcc with musl-dev is the usual Alpine pair
 # for static linking. The ldd check after the build confirms the result.
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache gcc musl-dev patch
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
+COPY --from=agentry cold-cache-clear.patch /agentry/
+# --fuzz=0: a hunk that no longer matches exactly fails the build rather than
+# landing somewhere near.
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 && \
 	go mod verify
 ARG GIT_TAG
 ARG GIT_COMMIT
 ENV CGO_ENABLED=1
+# The patch's tests, on the pinned commit: the clear fires only on a turn's
+# first request after a cold gap, never inside a turn, keeps the newest turns
+# and browser results, never quotes a result, and sends the same bytes again.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'ColdC|LastResponseAt' \
+	./pkg/session ./pkg/runtime ./pkg/config/latest
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
@@ -82,6 +108,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
+COPY --from=agentry cold-cache-clear.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -89,4 +116,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear patch, for the QuickAgent runtime's default harness"
