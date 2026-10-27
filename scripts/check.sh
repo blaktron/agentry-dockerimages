@@ -76,6 +76,9 @@
 #     level error with the audit log off, strip setuid and setgid bits and
 #     run as ms365; or the keeper, the generator's lockfile, the allow-lists
 #     or the MCP probe is missing (build/ms365).
+#   - the docker-agent build's patch is missing, empty, not applied with no
+#     fuzz by its Dockerfile, its tests not run there, or the patch not named
+#     in source.env (build/docker-agent).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
@@ -1259,11 +1262,33 @@ codexImage() {
 
 DOCKER_AGENT_CTX=build/docker-agent
 
+# checkDockerAgent holds the docker-agent build to its patch: present, applied
+# with no fuzz before the build, its tests run in the build, and named in
+# source.env, so a commit bump cannot drop it unseen.
+checkDockerAgent() {
+	local bad=0
+	if [ ! -s "$DOCKER_AGENT_CTX/cold-cache-clear.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/cold-cache-clear.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*cold-cache-clear\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply cold-cache-clear.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'ColdC|LastResponseAt'" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run the patch's tests"
+		bad=1
+	elif ! grep -q 'cold-cache-clear\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name cold-cache-clear.patch"
+		bad=1
+	fi
+	return "$bad"
+}
+
 # dockerAgentImage runs a built agentry-docker-agent-src hardened (no network,
 # every capability dropped, no new privileges, a read-only root, the image's own
 # user) and fails unless the user is not root, `docker-agent version` names
 # source.env's tag and commit, DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file
-# is setuid or setgid, the binary is static, and the binary links
+# is setuid or setgid, the binary is static, it carries the cold-cache clear
+# (its config key) and the image keeps the patch, and the binary links
 # golang.org/x/net v0.60.0 or later. PLATFORM asks for, and checks, one
 # architecture.
 dockerAgentImage() {
@@ -1332,6 +1357,18 @@ dockerAgentImage() {
 		go version -m "$out/docker-agent" >"$out/mods"
 	else
 		"$runtime" run --rm --network none -v "$out:/b:ro" "${REGISTRY:-ghcr.io/blaktron}/agentry-golang-alpine:$(golangTag)" go version -m /b/docker-agent >"$out/mods"
+	fi
+	if grep -aq 'cold_cache_clear' "$out/docker-agent"; then
+		echo "ok   the binary carries the cold-cache clear"
+	else
+		echo "FAIL the binary does not carry the cold-cache clear (cold-cache-clear.patch)"
+		bad=1
+	fi
+	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/doc/docker-agent/cold-cache-clear.patch'; then
+		echo "ok   the image keeps the patch at /usr/share/doc/docker-agent/"
+	else
+		echo "FAIL /usr/share/doc/docker-agent/cold-cache-clear.patch is missing"
+		bad=1
 	fi
 	local xnet
 	xnet=$(awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}' "$out/mods")
@@ -2675,7 +2712,7 @@ ms365Image() {
 
 runAll() {
 	local bad=0 step
-	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkCodex checkHostlink checkRipgrep checkBrowser checkCoder checkGog checkMs365; do
+	for step in checkManifest checkNotice checkScripts checkWorkflows checkBases checkUnsafe checkFiles checkTypst checkDockerAgent checkCodex checkHostlink checkRipgrep checkBrowser checkCoder checkGog checkMs365; do
 		if "$step"; then
 			echo "ok   $step"
 		else
@@ -2711,6 +2748,9 @@ fetchlicence checkTypst
 fetchdup checkTypst
 fonts checkTypst
 designfonts checkTypst
+dockeragentpatch checkDockerAgent
+dockeragentapply checkDockerAgent
+dockeragenttests checkDockerAgent
 codexsha checkCodex
 codextag checkCodex
 codexverify checkCodex
@@ -2780,6 +2820,9 @@ breakCase() {
 	fetchdup) grep -m1 '^fonts/' build/typst/fetch.tsv >x && cat x >>build/typst/fetch.tsv && rm x ;;
 	fonts) printf '# none\n\n' >build/typst/fixtures/fonts.txt ;;
 	designfonts) sed -i '/^Noto /!{/^#/!d}' build/typst/fixtures/fonts.txt ;;
+	dockeragentpatch) rm build/docker-agent/cold-cache-clear.patch ;;
+	dockeragentapply) sed -i 's/--fuzz=0 //' build/docker-agent/Dockerfile ;;
+	dockeragenttests) sed -i "s/-run 'ColdC|LastResponseAt'/-run 'Nothing'/" build/docker-agent/Dockerfile ;;
 	codexsha) sed -i 's/^CODEX_SHA256_ARM64=.*/CODEX_SHA256_ARM64=latest/' build/agentry-codex/source.env ;;
 	codextag) sed -i 's/^CODEX_TAG=.*/CODEX_TAG=latest/' build/agentry-codex/source.env ;;
 	codexverify) sed -i '/--certificate-github-workflow-sha/d' build/agentry-codex/verify.sh ;;

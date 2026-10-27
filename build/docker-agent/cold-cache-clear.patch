@@ -1,0 +1,872 @@
+diff --git a/pkg/agent/agent.go b/pkg/agent/agent.go
+index 06001c3..424bf53 100644
+--- a/pkg/agent/agent.go
++++ b/pkg/agent/agent.go
+@@ -51,6 +51,7 @@ type Agent struct {
+ 	maxConsecutiveToolCalls int
+ 	maxOldToolCallTokens    int
+ 	maxToolResultTokens     int
++	coldCacheClear          *ColdCacheClear
+ 	numHistoryItems         int
+ 	addPromptFiles          []string
+ 	addPromptFilesDepth     int
+@@ -148,6 +149,12 @@ func (a *Agent) MaxToolResultTokens() int {
+ 	return a.maxToolResultTokens
+ }
+ 
++// ColdCacheClear returns the agent's cold-cache clear, or nil when it has
++// none (added by Agentry's build).
++func (a *Agent) ColdCacheClear() *ColdCacheClear {
++	return a.coldCacheClear
++}
++
+ func (a *Agent) NumHistoryItems() int {
+ 	return a.numHistoryItems
+ }
+diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
+index 528aebc..1206e2e 100644
+--- a/pkg/agent/opts.go
++++ b/pkg/agent/opts.go
+@@ -254,6 +254,35 @@ func WithMaxToolResultTokens(n int) Opt {
+ 	}
+ }
+ 
++// ColdCacheClear is when and how much of the history's old tool results a
++// cold-cache clear replaces (latest.ColdCacheClearConfig; added by Agentry's
++// build).
++type ColdCacheClear struct {
++	After        time.Duration
++	KeepTurns    int
++	KeepBrowser  int
++	BrowserTools []string
++}
++
++// WithColdCacheClear sets the agent's cold-cache clear from its config; nil
++// leaves the agent without one.
++func WithColdCacheClear(c *latest.ColdCacheClearConfig) Opt {
++	return func(a *Agent) {
++		if c == nil {
++			a.coldCacheClear = nil
++			return
++		}
++		cc := &ColdCacheClear{After: c.After.Duration, KeepTurns: 2, KeepBrowser: 2, BrowserTools: slices.Clone(c.BrowserTools)}
++		if c.KeepTurns != nil {
++			cc.KeepTurns = *c.KeepTurns
++		}
++		if c.KeepBrowser != nil {
++			cc.KeepBrowser = *c.KeepBrowser
++		}
++		a.coldCacheClear = cc
++	}
++}
++
+ func WithNumHistoryItems(numHistoryItems int) Opt {
+ 	return func(a *Agent) {
+ 		a.numHistoryItems = numHistoryItems
+diff --git a/pkg/config/latest/cold_cache_clear_test.go b/pkg/config/latest/cold_cache_clear_test.go
+new file mode 100644
+index 0000000..c6dff67
+--- /dev/null
++++ b/pkg/config/latest/cold_cache_clear_test.go
+@@ -0,0 +1,53 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
++
++package latest
++
++import (
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestColdCacheClearParses(t *testing.T) {
++	t.Parallel()
++	cfg, err := parse([]byte(`version: "16"
++agents:
++  root:
++    model: anthropic/claude-sonnet-4-5
++    cold_cache_clear:
++      after: 5m
++      keep_turns: 3
++      keep_browser: 1
++      browser_tools: [browser_snapshot, browser_navigate]
++`))
++	require.NoError(t, err)
++	require.Len(t, cfg.Agents, 1)
++	c := cfg.Agents[0].ColdCacheClear
++	require.NotNil(t, c)
++	assert.Equal(t, 5*time.Minute, c.After.Duration)
++	require.NotNil(t, c.KeepTurns)
++	assert.Equal(t, 3, *c.KeepTurns)
++	require.NotNil(t, c.KeepBrowser)
++	assert.Equal(t, 1, *c.KeepBrowser)
++	assert.Equal(t, []string{"browser_snapshot", "browser_navigate"}, c.BrowserTools)
++}
++
++func TestColdCacheClearIsValidated(t *testing.T) {
++	t.Parallel()
++	for name, block := range map[string]string{
++		"no after":         "      keep_turns: 2\n",
++		"negative keep":    "      after: 5m\n      keep_turns: -1\n",
++		"negative browser": "      after: 5m\n      keep_browser: -1\n",
++		"unknown key":      "      after: 5m\n      keep_everything: true\n",
++		"unparsable after": "      after: soon\n",
++	} {
++		t.Run(name, func(t *testing.T) {
++			t.Parallel()
++			_, err := parse([]byte("version: \"16\"\nagents:\n  root:\n    model: anthropic/claude-sonnet-4-5\n    cold_cache_clear:\n" + block))
++			assert.Error(t, err)
++		})
++	}
++}
+diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
+index fd20c96..4f19e81 100644
+--- a/pkg/config/latest/types.go
++++ b/pkg/config/latest/types.go
+@@ -533,6 +533,19 @@ type FallbackConfig struct {
+ 	Cooldown Duration `json:"cooldown"`
+ }
+ 
++// ColdCacheClearConfig (added by Agentry's build) configures the cold-cache clear: when a turn's first
++// model request comes more than After since the previous model response
++// ended, every tool result older than the newest KeepTurns turns before the
++// current one is replaced by a placeholder that names the call, and so is
++// every result of a tool in BrowserTools but the newest KeepBrowser.
++// KeepTurns and KeepBrowser default to 2.
++type ColdCacheClearConfig struct {
++	After        Duration `json:"after" yaml:"after"`
++	KeepTurns    *int     `json:"keep_turns,omitempty" yaml:"keep_turns,omitempty"`
++	KeepBrowser  *int     `json:"keep_browser,omitempty" yaml:"keep_browser,omitempty"`
++	BrowserTools []string `json:"browser_tools,omitempty" yaml:"browser_tools,omitempty"`
++}
++
+ // Duration is a wrapper around time.Duration that supports YAML/JSON unmarshaling
+ // from string format (e.g., "1m", "30s", "2h30m").
+ type Duration struct {
+@@ -775,7 +788,11 @@ type AgentConfig struct {
+ 	// share the same budget. Tokens are approximated as len/4.
+ 	// Disabled by default; only positive values enable the cap.
+ 	MaxToolResultTokens int `json:"max_tool_result_tokens,omitempty"`
+-	NumHistoryItems     int `json:"num_history_items,omitempty"`
++	// ColdCacheClear (added by Agentry's build) replaces old tool results with a placeholder on the
++	// first model request of a turn that starts after the prompt cache has
++	// expired. Absent, nothing is cleared.
++	ColdCacheClear  *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`
++	NumHistoryItems int                   `json:"num_history_items,omitempty"`
+ 	// SessionCompaction toggles automatic session compaction for this agent:
+ 	// the proactive threshold trigger and the post-overflow auto-recovery.
+ 	// Manual /compact stays available regardless. Pointer (tri-state) so
+diff --git a/pkg/config/latest/validate.go b/pkg/config/latest/validate.go
+index 5535d88..99fe597 100644
+--- a/pkg/config/latest/validate.go
++++ b/pkg/config/latest/validate.go
+@@ -87,6 +87,9 @@ func (t *Config) Validate() error {
+ 		if err := agent.validateFallback(); err != nil {
+ 			return err
+ 		}
++		if err := agent.validateColdCacheClear(); err != nil {
++			return err
++		}
+ 		if err := agent.validateHarness(); err != nil {
+ 			return err
+ 		}
+@@ -230,6 +233,25 @@ func (a *AgentConfig) validateFallback() error {
+ 	return nil
+ }
+ 
++// validateColdCacheClear validates the cold-cache clear of an agent (added
++// by Agentry's build).
++func (a *AgentConfig) validateColdCacheClear() error {
++	c := a.ColdCacheClear
++	if c == nil {
++		return nil
++	}
++	if c.After.Duration <= 0 {
++		return errors.New("cold_cache_clear.after must be a positive duration")
++	}
++	if c.KeepTurns != nil && *c.KeepTurns < 0 {
++		return errors.New("cold_cache_clear.keep_turns must be >= 0")
++	}
++	if c.KeepBrowser != nil && *c.KeepBrowser < 0 {
++		return errors.New("cold_cache_clear.keep_browser must be >= 0")
++	}
++	return nil
++}
++
+ func (a *AgentConfig) validateHarness() error {
+ 	if a.Harness == nil {
+ 		return nil
+diff --git a/pkg/runtime/coldclear.go b/pkg/runtime/coldclear.go
+new file mode 100644
+index 0000000..eaf9aaf
+--- /dev/null
++++ b/pkg/runtime/coldclear.go
+@@ -0,0 +1,35 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"context"
++	"log/slog"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/session"
++)
++
++// clearColdToolResults runs the agent's cold-cache clear before the first
++// model request of a root session's stream: when the previous model response
++// ended longer ago than the prompt cache lives, the request re-sends the
++// whole history uncached, so old tool results are cleared then and the
++// cleared state is stored for every later request.
++func (r *LocalRuntime) clearColdToolResults(ctx context.Context, sess *session.Session, a *agent.Agent) {
++	c := a.ColdCacheClear()
++	if c == nil || sess.IsSubSession() {
++		return
++	}
++	last, ok := sess.LastResponseAt()
++	if !ok || r.now().Sub(last) <= c.After {
++		return
++	}
++	if !sess.ClearColdToolResults(c.KeepTurns, c.KeepBrowser, c.BrowserTools) {
++		return
++	}
++	slog.DebugContext(ctx, "Cleared old tool results after a cold cache", "agent", a.Name(), "session_id", sess.ID, "idle", r.now().Sub(last))
++	if err := r.sessionStore.UpdateSession(ctx, sess); err != nil {
++		slog.WarnContext(ctx, "Failed to persist the cold-cache clear", "session_id", sess.ID, "error", err)
++	}
++}
+diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
+new file mode 100644
+index 0000000..fa332c3
+--- /dev/null
++++ b/pkg/runtime/coldclear_test.go
+@@ -0,0 +1,186 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"context"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/config/latest"
++	"github.com/docker/docker-agent/pkg/session"
++	"github.com/docker/docker-agent/pkg/team"
++	"github.com/docker/docker-agent/pkg/tools"
++)
++
++// coldClock is a clock a tool handler may move while the runtime reads it.
++type coldClock struct {
++	mu sync.Mutex
++	t  time.Time
++}
++
++func (c *coldClock) Now() time.Time {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.t
++}
++
++func (c *coldClock) Advance(d time.Duration) {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	c.t = c.t.Add(d)
++}
++
++var coldStart = time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
++
++// coldHistory is three finished turns, each reading a file, the last answer
++// at answeredAt.
++func coldHistory(answeredAt time.Time) *session.Session {
++	sess := session.New(session.WithToolsApproved(true))
++	for i, path := range []string{"a.go", "b.go", "c.go"} {
++		id := "old-" + path
++		sess.AddMessage(session.UserMessage("read " + path))
++		sess.AddMessage(&session.Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: answeredAt.Add(time.Duration(i-2) * time.Minute).Format(time.RFC3339),
++			ToolCalls: []tools.ToolCall{{ID: id, Function: tools.FunctionCall{Name: "read_file", Arguments: `{"path":"` + path + `"}`}}}}})
++		sess.AddMessage(&session.Message{Message: chat.Message{Role: chat.MessageRoleTool, ToolCallID: id, Content: "contents of " + path}})
++		sess.AddMessage(&session.Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: answeredAt.Add(time.Duration(i-2) * time.Minute).Format(time.RFC3339), Content: "read " + path}})
++	}
++	return sess
++}
++
++func coldClearAgent(prov *messageRecordingProvider, extra ...agent.Opt) *agent.Agent {
++	opts := append([]agent.Opt{
++		agent.WithModel(prov),
++		agent.WithColdCacheClear(&latest.ColdCacheClearConfig{After: latest.Duration{Duration: 5 * time.Minute}}),
++	}, extra...)
++	return agent.New("root", "instructions", opts...)
++}
++
++func runColdTurn(t *testing.T, rt *LocalRuntime, sess *session.Session, text string) {
++	t.Helper()
++	sess.AddMessage(session.UserMessage(text))
++	for event := range rt.RunStream(t.Context(), sess) {
++		if failure, ok := event.(*ErrorEvent); ok {
++			t.Fatalf("unexpected runtime error: %s", failure.Error)
++		}
++	}
++}
++
++func resultsOf(messages []chat.Message) map[string]string {
++	out := map[string]string{}
++	for _, m := range messages {
++		if m.Role == chat.MessageRoleTool {
++			out[m.ToolCallID] = m.Content
++		}
++	}
++	return out
++}
++
++func TestColdCacheClearOnTheFirstRequestAfterAPause(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	prov := &messageRecordingProvider{id: "test/mock-model", streams: []*mockStream{
++		newStreamBuilder().AddContent("hello again").AddStopWithUsage(1, 1).Build(),
++	}}
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(coldClearAgent(prov))), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-2 * time.Hour))
++
++	runColdTurn(t, rt, sess, "back after lunch")
++
++	require.Len(t, prov.recordedMessages, 1)
++	got := resultsOf(prov.recordedMessages[0])
++	assert.Equal(t, `[cleared: read_file({"path":"a.go"}) returned 16 bytes; call it again to read it]`, got["old-a.go"])
++	assert.Equal(t, "contents of b.go", got["old-b.go"])
++	assert.Equal(t, "contents of c.go", got["old-c.go"])
++	// The stored item keeps the original; the session records the clear.
++	assert.Equal(t, "contents of a.go", sess.Messages[2].Message.Message.Content)
++	assert.Equal(t, "old-a.go", sess.AttributesSnapshot()[session.ColdClearedAttribute])
++	stored, err := rt.SessionStore().GetSession(t.Context(), sess.ID)
++	if err == nil {
++		assert.Equal(t, "old-a.go", stored.AttributesSnapshot()[session.ColdClearedAttribute])
++	}
++}
++
++func TestColdCacheClearNotWhileTheCacheIsWarm(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	prov := &messageRecordingProvider{id: "test/mock-model", streams: []*mockStream{
++		newStreamBuilder().AddContent("still here").AddStopWithUsage(1, 1).Build(),
++	}}
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(coldClearAgent(prov))), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-4 * time.Minute))
++
++	runColdTurn(t, rt, sess, "one more thing")
++
++	require.Len(t, prov.recordedMessages, 1)
++	assert.Equal(t, "contents of a.go", resultsOf(prov.recordedMessages[0])["old-a.go"])
++	assert.NotContains(t, sess.AttributesSnapshot(), session.ColdClearedAttribute)
++}
++
++func TestColdCacheClearWithoutTheBlockClearsNothing(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	prov := &messageRecordingProvider{id: "test/mock-model", streams: []*mockStream{
++		newStreamBuilder().AddContent("hello").AddStopWithUsage(1, 1).Build(),
++	}}
++	a := agent.New("root", "instructions", agent.WithModel(prov))
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(a)), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-2 * time.Hour))
++
++	runColdTurn(t, rt, sess, "back")
++
++	require.Len(t, prov.recordedMessages, 1)
++	assert.Equal(t, "contents of a.go", resultsOf(prov.recordedMessages[0])["old-a.go"])
++}
++
++// TestColdCacheClearNeverInsideATurn: a tool call that outlasts the cache's
++// life clears nothing in its own turn, and the next turn's first request
++// after a pause clears, then sends the same bytes again.
++func TestColdCacheClearNeverInsideATurn(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	slow := tools.Tool{Name: "slow_build", Parameters: map[string]any{}, Handler: func(context.Context, tools.ToolCall, tools.Runtime) (*tools.ToolCallResult, error) {
++		clock.Advance(2 * time.Hour)
++		return tools.ResultSuccess("built"), nil
++	}}
++	prov := &messageRecordingProvider{id: "test/mock-model", streams: []*mockStream{
++		newStreamBuilder().AddToolCallName("slow", "slow_build").AddToolCallArguments("slow", "{}").AddToolCallStopWithUsage(1, 1).Build(),
++		newStreamBuilder().AddContent("built it").AddStopWithUsage(1, 1).Build(),
++		newStreamBuilder().AddToolCallName("again", "slow_build").AddToolCallArguments("again", "{}").AddToolCallStopWithUsage(1, 1).Build(),
++		newStreamBuilder().AddContent("built again").AddStopWithUsage(1, 1).Build(),
++	}}
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(coldClearAgent(prov, agent.WithTools(slow)))), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-time.Minute))
++
++	runColdTurn(t, rt, sess, "build it")
++	require.Len(t, prov.recordedMessages, 2)
++	for i, request := range prov.recordedMessages {
++		for id, content := range resultsOf(request) {
++			assert.False(t, strings.HasPrefix(content, "[cleared: "), "request %d cleared %s inside the turn", i, id)
++		}
++	}
++
++	clock.Advance(time.Hour)
++	runColdTurn(t, rt, sess, "build it again")
++	require.Len(t, prov.recordedMessages, 4)
++	first, second := resultsOf(prov.recordedMessages[2]), resultsOf(prov.recordedMessages[3])
++	assert.True(t, strings.HasPrefix(first["old-a.go"], "[cleared: read_file"))
++	assert.True(t, strings.HasPrefix(first["old-b.go"], "[cleared: read_file"))
++	assert.Equal(t, "built", first["slow"])
++	// The cleared prefix is byte-stable within the turn.
++	for _, id := range []string{"old-a.go", "old-b.go", "old-c.go", "slow"} {
++		assert.Equal(t, first[id], second[id], id)
++	}
++}
+diff --git a/pkg/runtime/loop.go b/pkg/runtime/loop.go
+index d56b52e..a075398 100644
+--- a/pkg/runtime/loop.go
++++ b/pkg/runtime/loop.go
+@@ -864,6 +864,13 @@ func (r *LocalRuntime) runTurn(
+ 		ls.exitReason = endReason
+ 	}()
+ 
++	// A cold-cache clear (added by Agentry's build) runs before the
++	// stream's first model request only, so it never changes the history
++	// inside a turn.
++	if ls.iteration == 1 {
++		r.clearColdToolResults(ctx, sess, a)
++	}
++
+ 	// Run turn_start hooks before assembly so dynamic context can be diffed
+ 	// against what the model already knows. Changes extend the conversation;
+ 	// they never rewrite the frozen instruction prefix.
+diff --git a/pkg/session/coldclear.go b/pkg/session/coldclear.go
+new file mode 100644
+index 0000000..416f86e
+--- /dev/null
++++ b/pkg/session/coldclear.go
+@@ -0,0 +1,179 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
++
++package session
++
++import (
++	"fmt"
++	"slices"
++	"strings"
++	"time"
++	"unicode/utf8"
++
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/tools"
++)
++
++// A cold-cache clear replaces old tool results with a short placeholder at
++// the one moment it costs no prompt cache: the first request of a turn that
++// starts after the cache has expired, when the whole history is re-sent
++// uncached anyway. The stored items keep every original. Which results are
++// cleared is kept as a session attribute, so every later assembly of the
++// history (the next request, a reload, a compaction) sends the same bytes.
++
++// ColdClearedAttribute is the session attribute that lists the tool call IDs
++// whose results are cleared, one per line, sorted.
++const ColdClearedAttribute = "cold_cache_cleared"
++
++// coldClearArgsMax bounds the arguments a placeholder repeats, in bytes.
++const coldClearArgsMax = 200
++
++// LastResponseAt is when the newest assistant message was recorded. It
++// reports false when the session holds none or its time cannot be read.
++func (s *Session) LastResponseAt() (time.Time, bool) {
++	s.mu.RLock()
++	defer s.mu.RUnlock()
++	for i := range slices.Backward(s.Messages) {
++		m := s.Messages[i].Message
++		if m == nil || m.Message.Role != chat.MessageRoleAssistant {
++			continue
++		}
++		t, err := time.Parse(time.RFC3339Nano, m.Message.CreatedAt)
++		return t, err == nil
++	}
++	return time.Time{}, false
++}
++
++// ClearColdToolResults marks for clearing every tool result older than the
++// newest keepTurns turns before the current one, and every result of a tool
++// in browserTools but the newest keepBrowser of them, wherever they fall. A
++// turn begins at a user message the user sent; the newest such message is
++// the current turn's, which has no results yet. It reports whether a result
++// was newly marked; the caller persists the session.
++func (s *Session) ClearColdToolResults(keepTurns, keepBrowser int, browserTools []string) bool {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	var turns []int
++	names := map[string]string{}
++	for i, item := range s.Messages {
++		m := item.Message
++		if m == nil {
++			continue
++		}
++		switch m.Message.Role {
++		case chat.MessageRoleUser:
++			if !m.Implicit {
++				turns = append(turns, i)
++			}
++		case chat.MessageRoleAssistant:
++			for _, call := range m.Message.ToolCalls {
++				names[call.ID] = call.Function.Name
++			}
++		}
++	}
++	keepFrom := -1
++	if n := len(turns) - 1 - keepTurns; n >= 0 {
++		keepFrom = turns[n]
++	}
++
++	cleared := s.coldClearedLocked()
++	var browser []string
++	added := false
++	for i := range slices.Backward(s.Messages) {
++		m := s.Messages[i].Message
++		if m == nil || m.Message.Role != chat.MessageRoleTool || m.Message.ToolCallID == "" {
++			continue
++		}
++		id := m.Message.ToolCallID
++		clear := i < keepFrom
++		if slices.Contains(browserTools, names[id]) {
++			browser = append(browser, id)
++			clear = clear || len(browser) > keepBrowser
++		}
++		if clear && !cleared[id] {
++			cleared[id] = true
++			added = true
++		}
++	}
++	if !added {
++		return false
++	}
++	ids := make([]string, 0, len(cleared))
++	for id := range cleared {
++		ids = append(ids, id)
++	}
++	slices.Sort(ids)
++	if s.Attributes == nil {
++		s.Attributes = map[string]string{}
++	}
++	s.Attributes[ColdClearedAttribute] = strings.Join(ids, "\n")
++	return true
++}
++
++// coldClearedLocked is the set of cleared tool call IDs. The caller holds mu.
++func (s *Session) coldClearedLocked() map[string]bool {
++	set := map[string]bool{}
++	for id := range strings.SplitSeq(s.Attributes[ColdClearedAttribute], "\n") {
++		if id != "" {
++			set[id] = true
++		}
++	}
++	return set
++}
++
++// applyColdClear replaces each cleared tool result in items, a snapshot the
++// caller owns, with its placeholder.
++func (s *Session) applyColdClear(items []Item) {
++	s.mu.RLock()
++	cleared := s.coldClearedLocked()
++	s.mu.RUnlock()
++	if len(cleared) == 0 {
++		return
++	}
++	calls := map[string]tools.ToolCall{}
++	for _, item := range items {
++		if item.Message != nil && item.Message.Message.Role == chat.MessageRoleAssistant {
++			for _, call := range item.Message.Message.ToolCalls {
++				calls[call.ID] = call
++			}
++		}
++	}
++	for _, item := range items {
++		m := item.Message
++		if m == nil || m.Message.Role != chat.MessageRoleTool || !cleared[m.Message.ToolCallID] {
++			continue
++		}
++		m.Message.Content = coldClearPlaceholder(calls[m.Message.ToolCallID], &m.Message)
++		m.Message.MultiContent = nil
++	}
++}
++
++// coldClearPlaceholder names the call that produced result and its size,
++// and says how to get it back. It is built from the stored call alone and
++// never quotes the result.
++func coldClearPlaceholder(call tools.ToolCall, result *chat.Message) string {
++	name := call.Function.Name
++	if name == "" {
++		name = "a tool"
++	}
++	args := call.Function.Arguments
++	if len(args) > coldClearArgsMax {
++		cut := coldClearArgsMax
++		for cut > 0 && !utf8.RuneStart(args[cut]) {
++			cut--
++		}
++		args = args[:cut] + "…"
++	}
++	size := fmt.Sprintf("%d bytes", toolResultTextualBytes(result))
++	attachments := 0
++	for _, part := range result.MultiContent {
++		if part.Type != chat.MessagePartTypeText && part.Type != chat.MessagePartTypeDocument {
++			attachments++
++		}
++	}
++	if attachments > 0 {
++		size += fmt.Sprintf(" and %d attachments", attachments)
++	}
++	return fmt.Sprintf("[cleared: %s(%s) returned %s; call it again to read it]", name, args, size)
++}
+diff --git a/pkg/session/coldclear_test.go b/pkg/session/coldclear_test.go
+new file mode 100644
+index 0000000..bfc393f
+--- /dev/null
++++ b/pkg/session/coldclear_test.go
+@@ -0,0 +1,197 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
++
++package session
++
++import (
++	"encoding/json"
++	"fmt"
++	"strings"
++	"testing"
++	"time"
++	"unicode/utf8"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/tools"
++)
++
++var coldBase = time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
++
++// coldTurn appends a turn to sess: the user's message, one call of each of
++// calls with its result, and the closing answer, the turn's minute apart from
++// the others.
++func coldTurn(sess *Session, n int, calls ...[2]string) {
++	at := coldBase.Add(time.Duration(n) * time.Minute).Format(time.RFC3339)
++	sess.AddMessage(UserMessage(fmt.Sprintf("question %d", n)))
++	for i, c := range calls {
++		id := fmt.Sprintf("t%d-%d", n, i)
++		sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: at,
++			ToolCalls: []tools.ToolCall{{ID: id, Function: tools.FunctionCall{Name: c[0], Arguments: c[1]}}}}})
++		sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleTool, ToolCallID: id,
++			Content: fmt.Sprintf("result of %s in turn %d", c[0], n)}})
++	}
++	sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: at, Content: fmt.Sprintf("answer %d", n)}})
++}
++
++// toolResults maps each tool result the model would receive by its call ID.
++func toolResults(messages []chat.Message) map[string]string {
++	out := map[string]string{}
++	for _, m := range messages {
++		if m.Role == chat.MessageRoleTool {
++			out[m.ToolCallID] = m.Content
++		}
++	}
++	return out
++}
++
++func coldAgent() *agent.Agent { return agent.New("root", "instructions") }
++
++var browserTools = []string{"browser_snapshot", "browser_navigate"}
++
++func TestColdClearKeepsTheNewestTurnsAndBrowserResults(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	coldTurn(sess, 1, [2]string{"fs_read", `{"path":"a.go"}`}, [2]string{"browser_snapshot", `{}`})
++	coldTurn(sess, 2, [2]string{"fs_read", `{"path":"b.go"}`})
++	coldTurn(sess, 3, [2]string{"browser_navigate", `{"url":"https://example.com"}`}, [2]string{"browser_snapshot", `{}`}, [2]string{"browser_snapshot", `{}`})
++	coldTurn(sess, 4, [2]string{"fs_read", `{"path":"c.go"}`})
++	sess.AddMessage(UserMessage("the question after the pause"))
++
++	require.True(t, sess.ClearColdToolResults(2, 2, browserTools))
++	got := toolResults(sess.GetMessages(coldAgent()))
++
++	cleared := []string{"t1-0", "t1-1", "t2-0", "t3-0"}
++	kept := []string{"t3-1", "t3-2", "t4-0"}
++	for _, id := range cleared {
++		assert.True(t, strings.HasPrefix(got[id], "[cleared: "), "%s should be cleared: %q", id, got[id])
++	}
++	for _, id := range kept {
++		assert.True(t, strings.HasPrefix(got[id], "result of "), "%s should be whole: %q", id, got[id])
++	}
++	assert.Equal(t, `[cleared: fs_read({"path":"a.go"}) returned 27 bytes; call it again to read it]`, got["t1-0"])
++}
++
++func TestColdClearKeepsOnlyTheNewestBrowserResultsInsideKeptTurns(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	coldTurn(sess, 1, [2]string{"browser_snapshot", `{}`}, [2]string{"browser_snapshot", `{}`}, [2]string{"browser_snapshot", `{}`})
++	sess.AddMessage(UserMessage("again"))
++
++	require.True(t, sess.ClearColdToolResults(2, 2, browserTools))
++	got := toolResults(sess.GetMessages(coldAgent()))
++	assert.True(t, strings.HasPrefix(got["t1-0"], "[cleared: browser_snapshot({})"))
++	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-1"])
++	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-2"])
++}
++
++func TestColdClearWithNothingOldEnoughChangesNothing(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	coldTurn(sess, 1, [2]string{"fs_read", `{"path":"a.go"}`})
++	sess.AddMessage(UserMessage("again"))
++	before := sess.GetMessages(coldAgent())
++
++	assert.False(t, sess.ClearColdToolResults(2, 2, browserTools))
++	assert.Equal(t, before, sess.GetMessages(coldAgent()))
++	assert.NotContains(t, sess.AttributesSnapshot(), ColdClearedAttribute)
++}
++
++func TestColdClearPlaceholderNeverQuotesTheResult(t *testing.T) {
++	t.Parallel()
++	const resultSecret = "sk-result-0123456789abcdef"
++	sess := New()
++	sess.AddMessage(UserMessage("read the env"))
++	sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: coldBase.Format(time.RFC3339),
++		ToolCalls: []tools.ToolCall{{ID: "c1", Function: tools.FunctionCall{Name: "fs_read", Arguments: `{"path":".env","token":"[REDACTED]"}`}}}}})
++	sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleTool, ToolCallID: "c1", Content: "API_KEY=" + resultSecret,
++		MultiContent: []chat.MessagePart{{Type: chat.MessagePartTypeText, Text: "API_KEY=" + resultSecret}, {Type: chat.MessagePartTypeImageURL, ImageURL: &chat.MessageImageURL{URL: "data:image/png;base64,AAAA"}}}}})
++	sess.AddMessage(UserMessage("one"))
++	sess.AddMessage(UserMessage("two"))
++	sess.AddMessage(UserMessage("three"))
++
++	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	for _, m := range sess.GetMessages(coldAgent()) {
++		if m.Role != chat.MessageRoleTool {
++			continue
++		}
++		assert.NotContains(t, m.Content, resultSecret)
++		assert.Nil(t, m.MultiContent)
++		assert.Equal(t, `[cleared: fs_read({"path":".env","token":"[REDACTED]"}) returned 34 bytes and 1 attachments; call it again to read it]`, m.Content)
++	}
++	// The stored result is the original.
++	assert.Contains(t, sess.Messages[2].Message.Message.Content, resultSecret)
++}
++
++func TestColdClearCutsLongArguments(t *testing.T) {
++	t.Parallel()
++	args := `{"query":"` + strings.Repeat("é", 150) + `"}`
++	p := coldClearPlaceholder(tools.ToolCall{Function: tools.FunctionCall{Name: "search", Arguments: args}}, &chat.Message{Content: "x"})
++	inner := strings.TrimSuffix(strings.TrimPrefix(p, "[cleared: search("), ") returned 1 bytes; call it again to read it]")
++	assert.True(t, utf8.ValidString(inner))
++	assert.True(t, strings.HasSuffix(inner, "…"))
++	assert.LessOrEqual(t, len(strings.TrimSuffix(inner, "…")), coldClearArgsMax)
++}
++
++func TestColdClearIsStableAcrossRequestsReloadsAndCompaction(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	coldTurn(sess, 1, [2]string{"fs_read", `{"path":"a.go"}`})
++	coldTurn(sess, 2, [2]string{"fs_read", `{"path":"b.go"}`})
++	coldTurn(sess, 3, [2]string{"fs_read", `{"path":"c.go"}`})
++	sess.AddMessage(UserMessage("after the pause"))
++	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	first := sess.GetMessages(coldAgent())
++
++	// A second clear with the same history marks nothing new.
++	assert.False(t, sess.ClearColdToolResults(2, 2, nil))
++	assert.Equal(t, first, sess.GetMessages(coldAgent()))
++
++	// A reload of the stored session assembles the same history.
++	data, err := json.Marshal(sess)
++	require.NoError(t, err)
++	loaded := New()
++	require.NoError(t, json.Unmarshal(data, loaded))
++	assert.Equal(t, first, loaded.GetMessages(coldAgent()))
++
++	// The compaction's input carries the placeholder, not the original.
++	compaction, _, _ := sess.CompactionInput()
++	assert.True(t, strings.HasPrefix(toolResults(compaction)["t1-0"], "[cleared: fs_read"))
++	assert.Equal(t, "result of fs_read in turn 1", sess.Messages[2].Message.Message.Content)
++}
++
++func TestColdClearAddsToAnEarlierClear(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	coldTurn(sess, 1, [2]string{"fs_read", `{"path":"a.go"}`})
++	coldTurn(sess, 2, [2]string{"fs_read", `{"path":"b.go"}`})
++	coldTurn(sess, 3, [2]string{"fs_read", `{"path":"c.go"}`})
++	sess.AddMessage(UserMessage("after the first pause"))
++	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	coldTurn(sess, 5, [2]string{"fs_read", `{"path":"d.go"}`})
++	sess.AddMessage(UserMessage("after the second pause"))
++	require.True(t, sess.ClearColdToolResults(2, 2, nil))
++	got := toolResults(sess.GetMessages(coldAgent()))
++	// The first pause's message began a turn of its own, so turn 3 is
++	// now older than the two kept.
++	for _, id := range []string{"t1-0", "t2-0", "t3-0"} {
++		assert.True(t, strings.HasPrefix(got[id], "[cleared: "), id)
++	}
++	assert.Equal(t, "result of fs_read in turn 5", got["t5-0"])
++	assert.Equal(t, "t1-0\nt2-0\nt3-0", sess.AttributesSnapshot()[ColdClearedAttribute])
++}
++
++func TestLastResponseAt(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	_, ok := sess.LastResponseAt()
++	assert.False(t, ok)
++	coldTurn(sess, 3)
++	sess.AddMessage(UserMessage("next"))
++	at, ok := sess.LastResponseAt()
++	require.True(t, ok)
++	assert.Equal(t, coldBase.Add(3*time.Minute), at)
++}
+diff --git a/pkg/session/session.go b/pkg/session/session.go
+index 4bbd5a6..9fe4540 100644
+--- a/pkg/session/session.go
++++ b/pkg/session/session.go
+@@ -2360,6 +2360,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
+ // on the same session.
+ func (s *Session) CompactionInput() ([]chat.Message, []int, int) {
+ 	items := s.snapshotItems()
++	s.applyColdClear(items) // added by Agentry's build: cleared results read as placeholders
+ 
+ 	lastSummaryIndex := -1
+ 	for i := range slices.Backward(items) {
+@@ -2502,6 +2503,7 @@ func (s *Session) getMessages(a *agent.Agent, state *InstructionContextState, ex
+ 	// Take a snapshot of Messages under the lock, copying Message structs
+ 	// to avoid racing with UpdateMessage which may modify the pointed-to objects.
+ 	items := s.snapshotItems()
++	s.applyColdClear(items) // added by Agentry's build: cleared results read as placeholders
+ 	var instructionInitial []chat.Message
+ 	var instructionUpdates []InstructionUpdate
+ 	if state != nil {
+diff --git a/pkg/teamloader/teamloader.go b/pkg/teamloader/teamloader.go
+index 80f03b7..a8c6a55 100644
+--- a/pkg/teamloader/teamloader.go
++++ b/pkg/teamloader/teamloader.go
+@@ -445,6 +445,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
+ 			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
+ 			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
+ 			agent.WithMaxToolResultTokens(agentConfig.MaxToolResultTokens),
++			agent.WithColdCacheClear(agentConfig.ColdCacheClear), // added by Agentry's build
+ 			agent.WithNumHistoryItems(agentConfig.NumHistoryItems),
+ 			agent.WithSessionCompaction(agentConfig.SessionCompactionEnabled()),
+ 			agent.WithCommands(expander.ExpandCommands(ctx, agentConfig.Commands)),

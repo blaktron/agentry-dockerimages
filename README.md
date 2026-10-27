@@ -55,7 +55,7 @@ list. Built images are listed with what they are built from.
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear patch, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -478,13 +478,44 @@ dispatch the `coder` workflow from `main`.
 
 `build/docker-agent/` builds Docker Agent from the commit in `source.env`; it
 is the runner's default harness. `upstream.Dockerfile` is the vendor's
-Dockerfile at that commit, for comparison. Ours differs in five ways: every
+Dockerfile at that commit, for comparison. Ours differs in six ways: every
 base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
 from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
-linked; and otel's `otlptracegrpc` exporter is raised to the release that fixes
-the advisories reported against upstream's pin.
+linked; otel's `otlptracegrpc` exporter is raised to the release that fixes
+the advisories reported against upstream's pin; and it carries
+`cold-cache-clear.patch`.
+
+The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
+keep_browser, browser_tools}`. On the first model request of a turn that
+starts more than `after` since the previous model response ended, when the
+provider's prompt cache has expired and the whole history is re-sent uncached
+anyway, every tool result older than the newest `keep_turns` turns before the
+current one (default 2), and every result of a tool in `browser_tools` but the
+newest `keep_browser` (default 2), is sent as
+`[cleared: <tool>(<arguments>) returned <n> bytes; call it again to read it]`,
+with the arguments cut at 200 bytes. The stored session keeps every original
+and records which results are cleared, so later requests, a reload of the
+session and docker-agent's own compaction send the same bytes. Nothing is
+cleared inside a turn, and an agent without the setting behaves as upstream.
+The image keeps the patch at `/usr/share/doc/docker-agent/`. The patch leaves
+upstream's `agent-schema.json` alone: it is outside the build's context and
+the binary does not read it, so an editor validating an agent file against it
+does not know the setting.
+
+**Re-porting the patch on a commit bump.** Apply it to the new commit
+(`git apply --3way build/docker-agent/cold-cache-clear.patch` in a clone at
+`UPSTREAM_COMMIT`), resolve what no longer matches, and run its tests there:
+`go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
+./pkg/runtime ./pkg/config/latest`. The hooks it needs are the session's two
+history assemblies (`getMessages` and `CompactionInput`), the run loop's first
+model request (`runTurn` at `ls.iteration == 1`), the agent config's latest
+schema and the teamloader's agent options. Write the result back with `git
+diff > cold-cache-clear.patch`. The build applies it with `patch --fuzz=0`, so
+a hunk that moved fails the build rather than landing nearby, and runs its
+tests before the binary is built; `scripts/check.sh` fails if the patch, its
+application or its tests leave the Dockerfile.
 
 The `docker-agent` workflow builds it natively for amd64 and arm64, runs each
 hardened (`scripts/check.sh --docker-agent-image`), joins the two into one tag
