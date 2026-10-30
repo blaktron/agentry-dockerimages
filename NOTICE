@@ -14,7 +14,7 @@ terms are restated here.
 ### Docker Agent
 
     Upstream:   https://github.com/docker/docker-agent
-    Commit:     e7f1ec394dfa47aea0b066092a35c72564b192cb  (tag v1.152.0)
+    Commit:     b8fce99da4f6ee28af41a2d1e181296c8f17765e  (tag v1.154.0)
     Licence:    Apache-2.0
     Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
@@ -37,8 +37,9 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    the darwin/windows paths) are dropped; this builds Linux only. The binary is
    still CGO with external linking and still asserted static.
 5. otel's `otlptracegrpc` exporter is raised before the build from v1.40.0 to
-   v1.45.0, the first release that fixes advisories reported against
-   upstream's pin. `go.mod` and `go.sum` in the build are changed by `go get`.
+   v1.47.0 and `golang.org/x/net` from v0.61.0 to v0.62.0, the releases that
+   fix advisories reported against upstream's pins. `go.mod` and `go.sum` in
+   the build are changed by `go get`.
 6. `build/docker-agent/cold-cache-clear.patch` is applied before the build. It
    adds the agent setting `cold_cache_clear`, which replaces old tool results
    in the history sent to the model with a placeholder after the provider's

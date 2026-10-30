@@ -483,9 +483,9 @@ base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
 from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
-linked; otel's `otlptracegrpc` exporter is raised to the release that fixes
-the advisories reported against upstream's pin; and it carries
-`cold-cache-clear.patch`.
+linked; otel's `otlptracegrpc` exporter and `golang.org/x/net` are raised to the
+releases that fix the advisories reported against upstream's pins; and it
+carries `cold-cache-clear.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that

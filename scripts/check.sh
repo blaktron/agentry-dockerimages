@@ -146,7 +146,7 @@
 #       root, `docker-agent version` names source.env's tag and commit,
 #       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
 #       the binary is static, it carries the cold-cache clear and the image
-#       keeps the patch, and it links golang.org/x/net v0.60.0 or later.
+#       keeps the patch, and it links golang.org/x/net v0.62.0 or later.
 #       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
 #       run a built agentry-hostlink hardened, as the runner runs a host link
@@ -1290,7 +1290,7 @@ checkDockerAgent() {
 # source.env's tag and commit, DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file
 # is setuid or setgid, the binary is static, it carries the cold-cache clear
 # (its config key) and the image keeps the patch, and the binary links
-# golang.org/x/net v0.60.0 or later. PLATFORM asks for, and checks, one
+# golang.org/x/net v0.62.0 or later. PLATFORM asks for, and checks, one
 # architecture.
 dockerAgentImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id bad=0
@@ -1373,10 +1373,10 @@ dockerAgentImage() {
 	fi
 	local xnet
 	xnet=$(awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}' "$out/mods")
-	if [ -n "$xnet" ] && [ "$(printf '%s\nv0.60.0\n' "$xnet" | sort -V | head -1)" = v0.60.0 ]; then
+	if [ -n "$xnet" ] && [ "$(printf '%s\nv0.62.0\n' "$xnet" | sort -V | head -1)" = v0.62.0 ]; then
 		echo "ok   golang.org/x/net $xnet"
 	else
-		echo "FAIL golang.org/x/net is ${xnet:-absent}, want v0.60.0 or later"
+		echo "FAIL golang.org/x/net is ${xnet:-absent}, want v0.62.0 or later"
 		bad=1
 	fi
 	return "$bad"
