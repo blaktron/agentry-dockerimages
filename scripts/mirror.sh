@@ -4,7 +4,7 @@
 # `docker buildx imagetools create` copies a manifest registry to registry.
 # The layers never come to this machine and a multi-platform manifest list is
 # copied whole, so the destination digest equals the upstream digest:
-# ghcr.io/blaktron/agentry-alpine@sha256:5291… is alpine:3.22@sha256:5291….
+# ghcr.io/blaktron/agentry-alpine@sha256:5291… is alpine:3.24@sha256:5291….
 # The script checks the digest after each copy.
 #
 # Usage:

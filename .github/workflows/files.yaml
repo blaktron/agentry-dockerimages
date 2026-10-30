@@ -7,7 +7,7 @@
 # that exists, so a rebuild is a new tag and a new digest; the agentry-files
 # row in images.tsv then takes it, and the CLI pins that digest.
 #
-# The image is Alpine (our mirror of alpine:3.22, the runner image's own
+# The image is Alpine (our mirror of alpine:3.24, the runner image's own
 # runtime base) with the decoders added by apk. The CDN fetch happens here,
 # once, and never inside a person's run.
 #
@@ -175,6 +175,8 @@ jobs:
         run: ./scripts/check.sh --files-image "ghcr.io/blaktron/agentry-files@$DIGEST"
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
 
       - name: Sign the joined digest, keyless
         run: cosign sign --yes "ghcr.io/blaktron/agentry-files@$DIGEST"

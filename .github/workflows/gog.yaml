@@ -5,7 +5,7 @@
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
 # that. Each run is tagged with the upstream version, its UTC date and its run
-# number (0.46.0-2026.10.22.1) and refuses a tag that exists, so a rebuild is
+# number (0.47.1-2026.10.30.1) and refuses a tag that exists, so a rebuild is
 # a new tag and a new digest; the agentry-gog row in images.tsv then takes it,
 # and the CLI pins that digest.
 #
@@ -174,6 +174,8 @@ jobs:
         run: ./scripts/check.sh --gog-image "ghcr.io/blaktron/agentry-gog@$DIGEST"
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
 
       - name: Sign the joined digest, keyless
         run: cosign sign --yes "ghcr.io/blaktron/agentry-gog@$DIGEST"
@@ -188,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-gog\tghcr.io/blaktron/agentry-gog:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the Google Workspace MCP server: gog mcp, built from its pinned upstream commit (build/gog/), on our alpine:3.23 mirror, uid 10001, its tools annotated read-only unless started with --allow-write, amd64 and arm64, signed keyless by the gog workflow (agentry-cli policy.DefaultGogImage)")
+            "the Google Workspace MCP server: gog mcp, built from its pinned upstream commit (build/gog/), on our alpine:3.24 mirror, uid 10001, its tools annotated read-only unless started with --allow-write, amd64 and arm64, signed keyless by the gog workflow (agentry-cli policy.DefaultGogImage)")
           {
             echo "### agentry-gog:$IMAGE_TAG"
             echo

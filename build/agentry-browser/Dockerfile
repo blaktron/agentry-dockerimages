@@ -11,7 +11,7 @@
 #   /app                 @playwright/mcp from package-lock.json, installed
 #                        with --ignore-scripts, so no package runs code at
 #                        install
-#   /usr/local/bin/node  Node 24, the one file taken from NODE_IMAGE
+#   /usr/local/bin/node  Node 26, the one file taken from NODE_IMAGE
 #                        (Playwright needs Node 20 or later)
 #   /usr/lib/chromium/chromium
 #                        Debian's chromium package, built by Debian from the
@@ -65,7 +65,7 @@
 # so no frontend image is pulled from a floating tag.
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
-ARG NODE_IMAGE=node:24-bookworm-slim
+ARG NODE_IMAGE=node:26-trixie-slim
 
 FROM ${NODE_IMAGE} AS server
 WORKDIR /app

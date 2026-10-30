@@ -36,8 +36,8 @@
 # No `# syntax=` line: the Dockerfile frontend built into BuildKit reads this,
 # so no frontend image is pulled from a floating tag.
 
-ARG ALPINE_IMAGE=alpine:3.22
-ARG COSIGN_IMAGE=ghcr.io/sigstore/cosign/cosign:v3.1.3
+ARG ALPINE_IMAGE=alpine:3.24
+ARG COSIGN_IMAGE=ghcr.io/sigstore/cosign/cosign:v3.1.4
 
 FROM ${COSIGN_IMAGE} AS cosign
 

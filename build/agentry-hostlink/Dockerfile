@@ -38,12 +38,12 @@
 # another uid needs a passwd line for that uid bound in.
 #
 # scripts/build.sh passes ALPINE_IMAGE as our digest-pinned mirror of
-# alpine:3.22, the runner image's own runtime base.
+# alpine:3.24, the runner image's own runtime base.
 #
 # No `# syntax=` line: the Dockerfile frontend built into BuildKit reads this,
 # so no frontend image is pulled from a floating tag.
 
-ARG ALPINE_IMAGE=alpine:3.22
+ARG ALPINE_IMAGE=alpine:3.24
 
 FROM ${ALPINE_IMAGE}
 ARG PACKAGES="openssh-client-default openssh-client-common openssh-keygen"

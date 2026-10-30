@@ -103,7 +103,7 @@ jobs:
           fi
           echo "TAG=$tag" >>"$GITHUB_ENV"
 
-      # freshclam from Alpine 3.22, the files image's own base and ClamAV
+      # freshclam from Alpine 3.24, the files image's own base and ClamAV
       # version, run from our mirror of that base, into an empty directory.
       - name: Fetch the signature databases with freshclam
         run: |
@@ -158,6 +158,8 @@ jobs:
           echo "pushed $REPO:$TAG as $digest"
 
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
 
       - name: Sign the pushed digest, keyless
         run: cosign sign --yes "$REPO@$DIGEST"

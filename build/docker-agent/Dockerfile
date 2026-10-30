@@ -25,11 +25,13 @@
 #      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
 #      binary is still CGO with external linking, checked to be static, and
 #      built with -tags no_audio and the same version ldflags.
-#   5. otel's otlptracegrpc exporter is raised from upstream's v1.40.0 to
-#      v1.45.0 before the build, the first release that fixes the advisories
-#      govulncheck reports against upstream's pin. `go get` raises only what
-#      that module requires; the build records the result, and
-#      `go version -m /docker-agent` shows it.
+#   5. Two modules are raised before the build, to the releases that fix the
+#      advisories govulncheck reports against upstream's pins: otel's
+#      otlptracegrpc exporter from v1.40.0 to v1.47.0, the version of the rest
+#      of upstream's otel modules, and golang.org/x/net from v0.61.0 to
+#      v0.62.0, which fixes two flaws in its HTML parser and renderer that the
+#      fetch tool reaches. `go get` raises only what those modules require; the
+#      build records the result, and `go version -m /docker-agent` shows it.
 #   6. cold-cache-clear.patch, applied with no fuzz before the build, adds the
 #      agent setting `cold_cache_clear: {after, keep_turns, keep_browser,
 #      browser_tools}`. On the first model request of a turn that starts more
@@ -51,8 +53,8 @@
 # image, still apply. A run needs neither docker-cli nor the docker-mcp plugin;
 # removing them changes behaviour and needs a live run to confirm.
 
-ARG GO_IMAGE=golang:1.27.3-alpine3.23
-ARG ALPINE_IMAGE=alpine:3.23
+ARG GO_IMAGE=golang:1.27.3-alpine3.24
+ARG ALPINE_IMAGE=alpine:3.24
 ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 
 # Named stages so the bases resolve once and COPY --from can refer to them.
@@ -72,7 +74,8 @@ COPY --from=agentry cold-cache-clear.patch /agentry/
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
-	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 && \
+	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 \
+	golang.org/x/net@v0.62.0 && \
 	go mod verify
 ARG GIT_TAG
 ARG GIT_COMMIT

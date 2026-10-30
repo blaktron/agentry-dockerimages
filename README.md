@@ -41,15 +41,15 @@ list. Built images are listed with what they are built from.
 | `agentry-mcp-gateway` | `docker/mcp-gateway` | mirror | The MCP gateway, started once per run: the run's tool plane. |
 | `agentry-docker-agent` | `docker/docker-agent` | mirror | The vendor's harness image, byte for byte, the default before the build from source; kept for comparison and for policies that pin it. |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
-| `agentry-alpine` | `alpine:3.22` | mirror | The runner image's runtime base, and the base of the files and host link images. |
-| `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
-| `agentry-python-slim` | `python:3.12-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
-| `agentry-python-alpine` | `python:3.12-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
+| `agentry-alpine` | `alpine:3.24` | mirror | The runner image's runtime base, and the base of the files and host link images. |
+| `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine`, `node:26-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
+| `agentry-python-slim` | `python:3.15-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
+| `agentry-python-alpine` | `python:3.15-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
 | `agentry-unsafe-kali` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | The base of the desktop's Unsafe Mode exec images, amd64 and arm64. |
-| `agentry-files` | `alpine:3.22` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
+| `agentry-files` | `alpine:3.24` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
 | `agentry-typst` | Typst, patched, plus the Noto fonts, the report designs' font families and the cmarker package (`build/typst/`) | build | The PDF renderer's files for `export_pdf`, files only, amd64 and arm64. |
-| `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.22` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
-| `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
+| `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.24` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
+| `agentry-hostlink` | `alpine:3.24` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
@@ -63,13 +63,13 @@ Mirrors used only as bases when building:
 | Image | Source | Used by |
 |---|---|---|
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
-| `agentry-harness-alpine` | `alpine:3.23` | `build/docker-agent/` and `build/gog/`: runtime base. |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | `build/docker-agent/` and `build/gog/`: compiler. |
+| `agentry-harness-alpine` | `alpine:3.24` | `build/docker-agent/` and `build/gog/`: runtime base. |
+| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
-| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
+| `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
 | `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
-| `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
+| `agentry-node-trixie` | `node:26-trixie-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
 
 Packages that the publishing workflows create in this public repository are
@@ -80,7 +80,7 @@ building that context needs a `docker login ghcr.io` with read access.
 Each image is referenced by digest, for example:
 
 ```
-ghcr.io/blaktron/agentry-alpine:3.22@sha256:d406446bc05b82480756ce8f1287964d28768c23955fa9480d2a74a2eae7a654
+ghcr.io/blaktron/agentry-alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 ```
 
 The runner's operator policy can point these at another registry or pin them
@@ -99,7 +99,7 @@ by digest; see the runner documentation.
 - Docker Hub allows only a limited number of anonymous pulls per IP, which a
   full mirror run can exceed; `docker login` to Docker Hub first.
 - For the image checks: a container runtime. `--codex-image` also needs
-  `cosign`, `file` and network access to Sigstore.
+  `cosign` (version 3), `file` and network access to Sigstore.
 - Building a context from upstream source needs `git` and network access to
   the upstream repository, and several GB of free disk.
 
@@ -243,6 +243,10 @@ cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
+The workflows sign with cosign 3, which stores the signature as a Sigstore
+bundle attached to the digest. Verify with cosign 3 (the command above); cosign
+2.6 reads the same layout.
+
 The `clamav-db` workflow publishes the ClamAV signature bundle
 `ghcr.io/blaktron/agentry-clamav-db` daily (07:17 UTC) and on dispatch, always
 from `main`: the scheduled run starts on the default branch and only dispatches
@@ -290,12 +294,14 @@ Unsafe Mode is described at <https://docs.secureagentry.net/agentry/unsafe-mode/
 
 ### agentry-files
 
-`alpine:3.22` with `pandoc-cli`, `poppler-utils`, `tesseract-ocr` with English
+`alpine:3.24` with `pandoc-cli`, `poppler-utils`, `tesseract-ocr` with English
 data, Apache Tika (with `openjdk17-jre-headless`), `libarchive-tools`, `file`
 (libmagic) and `clamav-scanner` with `clamav-libunrar`, and their dependencies.
 There is no setuid or setgid file. `/etc/agentry/files/packages` lists the
-resolved versions. Tika's jar is pinned to Apache's SHA-512 and its wrapper
-bounds the heap to 512 MiB. The image holds no runner binary and no signature
+resolved versions. Tika is Apache's `tika-app` zip (the runnable jar and the
+`lib/` directory of parser jars its manifest names) unpacked in `/opt/tika`,
+with `/opt/tika/tika-app.jar` linking to the jar; the zip is pinned to Apache's
+SHA-512 and its wrapper bounds the heap to 512 MiB. Tika 4 runs on Java 17. The image holds no runner binary and no signature
 database; `clamscan` runs with no daemon, and `freshclam` is installed only
 because Alpine's package depends on it. `build/agentry-files/fixtures/` holds
 the documents and images the check decodes, and `expect.tsv` the phrase each
@@ -309,7 +315,7 @@ The decode step and the malware checks are described at
 
 The decode container has no network, so clamscan's signatures come from
 `ghcr.io/blaktron/agentry-clamav-db`. The `clamav-db` workflow runs
-`freshclam` from the `alpine:3.22` mirror into an empty directory, keeps
+`freshclam` from the `alpine:3.24` mirror into an empty directory, keeps
 exactly `main.cvd`, `daily.cvd` and `bytecode.cvd` (Cisco Talos's signed
 CVDs, which clamscan checks again as it loads them), checks them with the
 pinned files image and no network (`scripts/check.sh --clamav-db`), and pushes
@@ -324,7 +330,7 @@ as `COPYING` inside it, and the bundle passes each CVD on unmodified.
 
 Nothing is compiled. `build/agentry-codex/` puts OpenAI's release binary
 (`codex-<arch>-unknown-linux-musl` from the GitHub release `CODEX_TAG` in
-`source.env`), unmodified, on the `alpine:3.22` mirror, running as uid 10001.
+`source.env`), unmodified, on the `alpine:3.24` mirror, running as uid 10001.
 The fetch stage (`fetch.sh`) holds the tarball to its SHA-256; verifies the
 binary against OpenAI's `.sigstore` bundle with `verify.sh` (signer: OpenAI's
 `rust-release.yml` at `refs/tags/<CODEX_TAG>`, run at `CODEX_COMMIT`); proves
@@ -346,7 +352,7 @@ at <https://docs.secureagentry.net/runner/#model-sign-ins>.
 
 ### agentry-hostlink
 
-`alpine:3.22` with `openssh-client-default` (`ssh`), `openssh-client-common`
+`alpine:3.24` with `openssh-client-default` (`ssh`), `openssh-client-common`
 (`sftp`, `ssh-keyscan`, and `scp`, `ssh-add`, `ssh-agent` from the same
 package) and `openssh-keygen`, and their dependencies. `openssh-keysign`, the
 client's one setuid program, is not installed, and there is no setuid or
@@ -359,7 +365,7 @@ It runs as uid 10001 (`hostlink`). `ssh` will not start for a uid with no
 passwd entry, so running it as another uid needs a passwd line for that uid
 bound in; and `ssh` accepts a private key of mode 0600 only when the uid
 running it owns the file. The check runs against a throwaway OpenSSH server
-(the `alpine:3.22` mirror with `openssh-server`, built by the check) on an
+(the `alpine:3.24` mirror with `openssh-server`, built by the check) on an
 internal Docker network with no route out.
 
 Target hosts are described at
@@ -374,9 +380,13 @@ gateway and passes the settings that hold a run (proxy, tool filter, Chromium
 sandbox, output folder, secrets file).
 
 - `@playwright/mcp` is installed in `/app` with `npm ci --ignore-scripts
-  --omit=dev` on the `node:24-bookworm-slim` mirror, held by
+  --omit=dev` on the `node:26-trixie-slim` mirror, held by
   `package-lock.json` (exact versions, sha512 integrity). That mirror also
-  supplies `/usr/local/bin/node`.
+  supplies `/usr/local/bin/node`. The server depends on an exact prerelease of
+  Playwright, made for an older Chromium than Debian's security archive now
+  carries, so `package.json`'s `overrides` hold `playwright` and
+  `playwright-core` to the stable release `PLAYWRIGHT_VERSION` names, made for
+  the installed Chromium.
 - Chromium is Debian's build from the Chromium project's open-source code, with
   no Widevine CDM and no other proprietary component. `install.sh` installs it
   from [snapshot.debian.org](https://snapshot.debian.org/) at the timestamp in
@@ -408,7 +418,10 @@ run's `reports/browser/`, with no setuid or setgid file (Debian's setuid
 
 To bump: set the new version in `package.json` and run `npm install
 --package-lock-only --ignore-scripts` in `build/agentry-browser/`; copy
-`MCP_VERSION` and `PLAYWRIGHT_VERSION` into `source.env`. Then pick a
+`MCP_VERSION` and `PLAYWRIGHT_VERSION` into `source.env`. While `overrides`
+holds Playwright, move its two versions to the newest stable Playwright whose
+`browsers.json` names the Chromium major version in the archive, or drop the
+override once the server's own Playwright is made for it. Then pick a
 snapshot.debian.org timestamp whose `trixie-security` (or `trixie`) holds a
 `chromium` for the major version the new `browsers.json` names, or the one
 before it, and set `DEBIAN_SNAPSHOT`, `CHROMIUM_VERSION`,
@@ -433,7 +446,7 @@ mounts are the runner's settings. It holds:
 - Go, the Go project's release, in `/usr/local/go`, from the
   `golang:1.27.3-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
   asks for a newer Go fails instead of downloading a toolchain;
-- Node 24 and npm, from the `node:24-bookworm-slim` mirror;
+- Node 26 and npm, from the `node:26-trixie-slim` mirror;
 - in `/usr/local/bin`, five release binaries, each its project's static
   build, fetched over https and held to the SHA-256 that `source.env` pins
   for each architecture: `gh` (GitHub), `glab` (GitLab) and `tea` (Gitea),
@@ -483,9 +496,9 @@ base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
 from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
-linked; otel's `otlptracegrpc` exporter is raised to the release that fixes
-the advisories reported against upstream's pin; and it carries
-`cold-cache-clear.patch`.
+linked; otel's `otlptracegrpc` exporter and `golang.org/x/net` are raised to the
+releases that fix the advisories reported against upstream's pins; and it
+carries `cold-cache-clear.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that
@@ -533,15 +546,18 @@ is started with `--allow-write`, and sending mail only with
 `--allow-gmail-send` too. It is built rather than mirrored because gog's own
 image is amd64 only and unsigned, and its Linux release binaries carry
 checksums and no signature. `build/gog/Dockerfile` lists how it differs
-from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.23
+from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.24
 mirrors, the project's release build settings (CGO off, `-trimpath`,
-`GOTOOLCHAIN=local`, module sums verified), keeps its licence at
-`/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits, and
-otherwise matches upstream: uid 10001 (`gog`), `/persist/gogcli` for its
+`GOTOOLCHAIN=local`, module sums verified), raises `golang.org/x/net` to
+v0.62.0, the release that fixes GO-2026-6860 (quadratic time parsing
+crafted HTML, reachable through the Gmail compose text conversion), keeps its
+licence at `/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits,
+and otherwise matches upstream: uid 10001 (`gog`), `/persist/gogcli` for its
 documented `GOG_HOME`, and `gog` as the entrypoint.
 
 `scripts/check.sh --gog-image <ref>` runs it with no network and a read-only
-root, `GOG_HOME` on a tmpfs and the file keyring, and drives `gog mcp` over
+root, `GOG_HOME` on a tmpfs and the file keyring, holds the linked
+`golang.org/x/net` to v0.62.0 or later, and drives `gog mcp` over
 stdio with `build/gog/check/mcp.py`: every tool reads with no flag,
 `--allow-write` adds tools and no send, `--allow-gmail-send` adds the send
 tools, and a call with nobody signed in is an error. The `gog` workflow
@@ -550,7 +566,8 @@ builds amd64 and arm64 natively, checks each, joins them into one tag
 prints the `images.tsv` row. To move it: set the commit and tag in
 `source.env`, compare the project's Dockerfile at that commit with the
 differences `build/gog/Dockerfile` lists, run `govulncheck ./...` over the
-source, then `--gog-image` on a
+source (drop the `golang.org/x/net` raise once the
+project's own `go.mod` requires v0.62.0 or later), then `--gog-image` on a
 local build, and dispatch the workflow from `main`.
 
 ### agentry-ms365
