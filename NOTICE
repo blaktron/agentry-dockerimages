@@ -182,7 +182,7 @@ naming them — see each upstream repository.
 | `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
-| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.3` | see upstream (cosign: Apache-2.0) |
+| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.4` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
 | `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | MinIO: GNU AGPL-3.0; its source is below |

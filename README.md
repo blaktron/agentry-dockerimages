@@ -99,7 +99,7 @@ by digest; see the runner documentation.
 - Docker Hub allows only a limited number of anonymous pulls per IP, which a
   full mirror run can exceed; `docker login` to Docker Hub first.
 - For the image checks: a container runtime. `--codex-image` also needs
-  `cosign`, `file` and network access to Sigstore.
+  `cosign` (version 3), `file` and network access to Sigstore.
 - Building a context from upstream source needs `git` and network access to
   the upstream repository, and several GB of free disk.
 
@@ -242,6 +242,10 @@ cosign verify ghcr.io/blaktron/agentry-<image>@<digest> \
   --certificate-identity https://github.com/blaktron/agentry-dockerimages/.github/workflows/<workflow>.yaml@refs/heads/main \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
+
+The workflows sign with cosign 3, which stores the signature as a Sigstore
+bundle attached to the digest. Verify with cosign 3 (the command above); cosign
+2.6 reads the same layout.
 
 The `clamav-db` workflow publishes the ClamAV signature bundle
 `ghcr.io/blaktron/agentry-clamav-db` daily (07:17 UTC) and on dispatch, always
