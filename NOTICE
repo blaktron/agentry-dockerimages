@@ -180,7 +180,9 @@ naming them — see each upstream repository.
 | `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
 | `agentry-node-alpine` | `node:26-alpine` | see upstream (Node.js: MIT) |
 | `agentry-python-alpine` | `python:3.15-alpine` | see upstream (Python: PSF) |
+| `agentry-python-alpine` | `python:3.14-alpine` | see upstream (Python: PSF) |
 | `agentry-python-slim` | `python:3.15-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-python-slim` | `python:3.14-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
 | `agentry-node-trixie` | `node:26-trixie-slim` | see upstream (Node.js: MIT; Debian trixie packages, each under its own licence) |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
