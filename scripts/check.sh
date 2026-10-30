@@ -65,9 +65,9 @@
 #     SHA-256 and its version (build/agentry-coder).
 #   - the gog image's source.env does not pin a 40-hex commit and a version
 #     tag; its Dockerfile does not build with CGO off, GOTOOLCHAIN local and
-#     the module sums verified, refuse a dynamically linked binary, strip
-#     setuid and setgid bits and run as gog; or the MCP probe is missing
-#     (build/gog).
+#     the module sums verified, raise golang.org/x/net before the build,
+#     refuse a dynamically linked binary, strip setuid and setgid bits and
+#     run as gog; or the MCP probe is missing (build/gog).
 #   - the ms365 image's source.env does not pin a 40-hex commit and a
 #     version tag; its Dockerfile does not pin Graph's OpenAPI documents by
 #     commit and sha256, install every package with its scripts off, take the
@@ -214,7 +214,8 @@
 #       root, uid 10001, GOG_HOME on a tmpfs and the file keyring. It fails
 #       unless `gog --version` names source.env's tag and commit, no file is
 #       setuid or setgid, no sudo or SSH program is on the PATH, the binary
-#       is static, the licence is there, and `gog mcp`, driven over stdio by
+#       is static, it links golang.org/x/net v0.62.0 or later, the licence is
+#       there, and `gog mcp`, driven over stdio by
 #       build/gog/check/mcp.py, lists only tools annotated read-only with no
 #       flag, more with --allow-write and none of them a send, exactly
 #       Gmail's send tools more with --allow-gmail-send too (which it refuses
@@ -2290,8 +2291,9 @@ GOG_CTX=build/gog
 # checkGog holds the gog image's context to its pins: source.env names a
 # 40-hex upstream commit, a v-prefixed version tag and the image built per
 # architecture; the Dockerfile builds with CGO off, GOTOOLCHAIN local and the
-# module sums verified, refuses a dynamically linked binary, strips setuid
-# and setgid bits and runs as gog; the MCP probe is there.
+# module sums verified, raises golang.org/x/net before the build, refuses a
+# dynamically linked binary, strips setuid and setgid bits and runs as gog;
+# the MCP probe is there.
 checkGog() {
 	local bad=0
 	(
@@ -2312,7 +2314,7 @@ checkGog() {
 	) || bad=1
 	local want
 	# shellcheck disable=SC1003 # each trailing backslash is the Dockerfile's line continuation, matched literally
-	for want in 'ENV CGO_ENABLED=0 \' '	GOTOOLCHAIN=local \' 'RUN go mod download && go mod verify' 'USER gog' 'RUN if ldd /out/gog >/dev/null 2>&1; then \'; do
+	for want in 'ENV CGO_ENABLED=0 \' '	GOTOOLCHAIN=local \' 'RUN go mod download && go mod verify' 'RUN go get golang.org/x/net@v0.62.0 && go mod verify' 'USER gog' 'RUN if ldd /out/gog >/dev/null 2>&1; then \'; do
 		if ! grep -qxF -- "$want" "$GOG_CTX/Dockerfile"; then
 			echo "$GOG_CTX/Dockerfile: lacks the line: $want"
 			bad=1
@@ -2402,6 +2404,20 @@ gogImage() {
 		echo "ok   the binary is static"
 	else
 		echo "FAIL the binary is not static: $(file -b "$out/gog")"
+		bad=1
+	fi
+	# The module versions the binary records; go is on the runner, else our
+	# golang mirror reads them.
+	local xnet
+	if command -v go >/dev/null; then
+		xnet=$(go version -m "$out/gog" | awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}')
+	else
+		xnet=$("$runtime" run --rm --network none -v "$out:/b:ro" "${REGISTRY:-ghcr.io/blaktron}/agentry-golang-alpine:$(golangTag)" go version -m /b/gog | awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}')
+	fi
+	if [ -n "$xnet" ] && [ "$(printf '%s\nv0.62.0\n' "$xnet" | sort -V | head -1)" = v0.62.0 ]; then
+		echo "ok   golang.org/x/net $xnet"
+	else
+		echo "FAIL golang.org/x/net is ${xnet:-absent}, want v0.62.0 or later"
 		bad=1
 	fi
 	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/licenses/gog/LICENSE' </dev/null; then
@@ -2506,7 +2522,7 @@ checkMs365() {
 	# shellcheck disable=SC1003,SC2016 # each trailing backslash is the Dockerfile's line continuation and each $ its own, matched literally
 	for want in '	&& printf '"'"'%s  openapi.yaml\n%s  openapi-beta.yaml\n'"'"' "$GRAPH_V1_SHA256" "$GRAPH_BETA_SHA256" | sha256sum -c -' \
 		'RUN npm ci --ignore-scripts --no-audit --no-fund' \
-		'	&& grep -qF '"'"'const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);'"'"' src/server.ts \' \
+		'	&& grep -qF '"'"'!this.options.appMode && Boolean(this.options.enableAuthTools);'"'"' src/server.ts \' \
 		'	&& ! grep -qF '"'"'npx -y openapi-zod-client'"'"' bin/modules/generate-mcp-tools.mjs \' \
 		'	MS365_MCP_AUTH_CACHE_COMMAND=/opt/agentry/cache-wrap \' \
 		'	MS365_MCP_USE_KEYTAR=0 \' \
@@ -2787,6 +2803,7 @@ coderbinsha checkCoder
 coderfetch checkCoder
 gogcommit checkGog
 gogcgo checkGog
+gogxnet checkGog
 gogroot checkGog
 ms365commit checkMs365
 ms365scripts checkMs365
@@ -2858,10 +2875,11 @@ breakCase() {
 	coderbinsha) sed -i 's/^GLAB_SHA256_ARM64=.*/GLAB_SHA256_ARM64=latest/' build/agentry-coder/source.env ;;
 	gogcommit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=main/' build/gog/source.env ;;
 	gogcgo) sed -i 's/^ENV CGO_ENABLED=0 \\$/ENV CGO_ENABLED=1 \\/' build/gog/Dockerfile ;;
+	gogxnet) sed -i '/^RUN go get golang.org\/x\/net@v0.62.0 && go mod verify$/d' build/gog/Dockerfile ;;
 	gogroot) sed -i '/^USER gog$/d' build/gog/Dockerfile ;;
 	ms365commit) sed -i 's/^UPSTREAM_COMMIT=.*/UPSTREAM_COMMIT=main/' build/ms365/source.env ;;
 	ms365scripts) sed -i 's/^RUN npm ci --ignore-scripts --no-audit --no-fund$/RUN npm ci --no-audit --no-fund/' build/ms365/Dockerfile ;;
-	ms365authtools) sed -i '/const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);. src\/server.ts \\$/d' build/ms365/Dockerfile ;;
+	ms365authtools) sed -i '/!this.options.appMode && Boolean(this.options.enableAuthTools);. src\/server.ts \\$/d' build/ms365/Dockerfile ;;
 	ms365openapi) sed -i 's/^ARG GRAPH_METADATA_COMMIT=.*/ARG GRAPH_METADATA_COMMIT=master/' build/ms365/Dockerfile ;;
 	ms365root) sed -i '/^USER ms365$/d' build/ms365/Dockerfile ;;
 	coderfetch) sed -i 's/ | sha256sum -c - || refuse "\$1 is not/ | true || refuse "$1 is not/' build/agentry-coder/install.sh ;;

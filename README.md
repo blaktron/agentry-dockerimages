@@ -535,13 +535,16 @@ image is amd64 only and unsigned, and its Linux release binaries carry
 checksums and no signature. `build/gog/Dockerfile` lists how it differs
 from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.24
 mirrors, the project's release build settings (CGO off, `-trimpath`,
-`GOTOOLCHAIN=local`, module sums verified), keeps its licence at
-`/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits, and
-otherwise matches upstream: uid 10001 (`gog`), `/persist/gogcli` for its
+`GOTOOLCHAIN=local`, module sums verified), raises `golang.org/x/net` to
+v0.62.0, the release that fixes GO-2026-6860 (quadratic time parsing
+crafted HTML, reachable through the Gmail compose text conversion), keeps its
+licence at `/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits,
+and otherwise matches upstream: uid 10001 (`gog`), `/persist/gogcli` for its
 documented `GOG_HOME`, and `gog` as the entrypoint.
 
 `scripts/check.sh --gog-image <ref>` runs it with no network and a read-only
-root, `GOG_HOME` on a tmpfs and the file keyring, and drives `gog mcp` over
+root, `GOG_HOME` on a tmpfs and the file keyring, holds the linked
+`golang.org/x/net` to v0.62.0 or later, and drives `gog mcp` over
 stdio with `build/gog/check/mcp.py`: every tool reads with no flag,
 `--allow-write` adds tools and no send, `--allow-gmail-send` adds the send
 tools, and a call with nobody signed in is an error. The `gog` workflow
@@ -550,7 +553,8 @@ builds amd64 and arm64 natively, checks each, joins them into one tag
 prints the `images.tsv` row. To move it: set the commit and tag in
 `source.env`, compare the project's Dockerfile at that commit with the
 differences `build/gog/Dockerfile` lists, run `govulncheck ./...` over the
-source, then `--gog-image` on a
+source (drop the `golang.org/x/net` raise once the
+project's own `go.mod` requires v0.62.0 or later), then `--gog-image` on a
 local build, and dispatch the workflow from `main`.
 
 ### agentry-ms365

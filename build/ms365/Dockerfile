@@ -56,7 +56,7 @@ ARG NODE_IMAGE=node:24-alpine
 
 # Microsoft Graph's OpenAPI documents at a pinned msgraph-metadata commit.
 FROM ${NODE_IMAGE} AS openapi
-ARG GRAPH_METADATA_COMMIT=1fd0ef510f79f3dadb3e083bdebc9496f939a11c
+ARG GRAPH_METADATA_COMMIT=4c15d2c64f66348a6a2ff7227655c64a14ad39b7
 ARG GRAPH_V1_SHA256=69de68b2c895bc608a58229e662e2b3eeb23524385516afc250ff0b8f165ff29
 ARG GRAPH_BETA_SHA256=1cc7badd129364daec0c97b37aa2785e5d4b299fceef866170d4f576c263caef
 WORKDIR /openapi
@@ -85,8 +85,8 @@ ARG GIT_TAG
 RUN sed -i 's#npx -y openapi-zod-client #/tools/node_modules/.bin/openapi-zod-client #' bin/modules/generate-mcp-tools.mjs \
 	&& grep -qF '/tools/node_modules/.bin/openapi-zod-client ' bin/modules/generate-mcp-tools.mjs \
 	&& ! grep -qF 'npx -y openapi-zod-client' bin/modules/generate-mcp-tools.mjs \
-	&& sed -i 's#const shouldRegisterAuthTools = !this.options.http || this.options.enableAuthTools;#const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);#' src/server.ts \
-	&& grep -qF 'const shouldRegisterAuthTools = Boolean(this.options.enableAuthTools);' src/server.ts \
+	&& sed -i 's#!this.options.appMode && (!this.options.http || this.options.enableAuthTools);#!this.options.appMode \&\& Boolean(this.options.enableAuthTools);#' src/server.ts \
+	&& grep -qF '!this.options.appMode && Boolean(this.options.enableAuthTools);' src/server.ts \
 	&& npm pkg set "version=${GIT_TAG#v}"
 RUN npm run generate && npm run build
 
