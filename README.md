@@ -294,8 +294,10 @@ Unsafe Mode is described at <https://docs.secureagentry.net/agentry/unsafe-mode/
 data, Apache Tika (with `openjdk17-jre-headless`), `libarchive-tools`, `file`
 (libmagic) and `clamav-scanner` with `clamav-libunrar`, and their dependencies.
 There is no setuid or setgid file. `/etc/agentry/files/packages` lists the
-resolved versions. Tika's jar is pinned to Apache's SHA-512 and its wrapper
-bounds the heap to 512 MiB. The image holds no runner binary and no signature
+resolved versions. Tika is Apache's `tika-app` zip (the runnable jar and the
+`lib/` directory of parser jars its manifest names) unpacked in `/opt/tika`,
+with `/opt/tika/tika-app.jar` linking to the jar; the zip is pinned to Apache's
+SHA-512 and its wrapper bounds the heap to 512 MiB. Tika 4 runs on Java 17. The image holds no runner binary and no signature
 database; `clamscan` runs with no daemon, and `freshclam` is installed only
 because Alpine's package depends on it. `build/agentry-files/fixtures/` holds
 the documents and images the check decodes, and `expect.tsv` the phrase each

@@ -255,9 +255,11 @@ own binary, under that repository's licence. This repository changes where their
 
 ## agentry-files
 
-Apache Tika 3.3.2 (https://tika.apache.org), distributed unchanged as its
-SHA-512-pinned tika-app jar, is Apache-2.0. Its LICENSE and NOTICE, including
-its dependencies' notices, are preserved in the jar's META-INF directory.
+Apache Tika 4.2.0 (https://tika.apache.org), distributed unchanged as its
+SHA-512-pinned tika-app zip (the tika-app jar and the parser jars in its lib
+directory), is Apache-2.0. Its LICENSE and NOTICE sit beside the jar in
+/opt/tika, and its dependencies' notices are preserved in the jars' META-INF
+directories.
 OpenJDK, libarchive, libmagic and ClamAV (clamav-scanner, clamav-libunrar
 and their dependency freshclam, GPL-2.0-only as Alpine packages them) are
 installed from Alpine with their own package licences. The wrapper we add is ours, under MIT.
@@ -278,7 +280,7 @@ Each carries its licence, the GNU GPL version 2, as COPYING inside it.
 ## agentry-codex
 
     Upstream:   https://github.com/openai/codex
-    Release:    rust-v0.162.0 (commit c1382380de69521303b416720a52f42d51af6248)
+    Release:    rust-v0.166.0 (commit 6ff1e1ca3b30fc8b914720681fcf5fe62e95f856)
     Licence:    Apache-2.0
     Our image:  agentry-codex
     Context:    build/agentry-codex/
