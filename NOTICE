@@ -179,9 +179,9 @@ naming them — see each upstream repository.
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
 | `agentry-node-alpine` | `node:26-alpine` | see upstream (Node.js: MIT) |
-| `agentry-python-alpine` | `python:3.14-alpine` | see upstream (Python: PSF) |
-| `agentry-python-slim` | `python:3.14-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
-| `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
+| `agentry-python-alpine` | `python:3.15-alpine` | see upstream (Python: PSF) |
+| `agentry-python-slim` | `python:3.15-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-node-trixie` | `node:26-trixie-slim` | see upstream (Node.js: MIT; Debian trixie packages, each under its own licence) |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.4` | see upstream (cosign: Apache-2.0) |
@@ -205,8 +205,8 @@ package database (`/var/lib/dpkg/status` on Debian and Kali,
 `/lib/apk/db/installed` on Alpine) and its licence in
 `/usr/share/doc/<package>/copyright` (Debian, Kali).
 
-- Debian (`agentry-python-slim`, `agentry-debian` and `agentry-browser`,
-  trixie; `agentry-node-bookworm`, bookworm): https://sources.debian.org/ for
+- Debian (`agentry-python-slim`, `agentry-debian`, `agentry-node-trixie` and
+  `agentry-browser`, trixie): https://sources.debian.org/ for
   browsing, https://deb.debian.org/debian/pool/ for the source archives, and
   https://snapshot.debian.org/ for a version that is no longer in the
   archive. `agentry-browser`'s packages all come from the snapshot named in
@@ -369,8 +369,8 @@ it, and under which terms:
   which is Chromium's released source with Debian's patches. The build adds
   one file, the Chromium policy at
   `/etc/chromium/policies/managed/agentry.json`.
-- **Node.js** 24, the one file `/usr/local/bin/node`, taken from the
-  `node:24-bookworm-slim` mirror: MIT, with the licences of the components it
+- **Node.js** 26, the one file `/usr/local/bin/node`, taken from the
+  `node:26-trixie-slim` mirror: MIT, with the licences of the components it
   bundles; Node's `LICENSE` is at
   `/usr/share/licenses/agentry-browser/node/LICENSE`.
 - **`@playwright/mcp`** 0.0.83 and **`playwright-core`** 1.64.1 (with
@@ -409,9 +409,9 @@ The Coding agent's toolchain image. What is in it, and under which terms:
   `/usr/local/go` taken unchanged from the `golang:1.27.3-trixie` mirror:
   BSD-3-Clause, with Go's `LICENSE` and `PATENTS` at
   `/usr/share/licenses/agentry-coder/go/`.
-- **Node.js** 24, the file `/usr/local/bin/node`, and **npm**, the folder
+- **Node.js** 26, the file `/usr/local/bin/node`, and **npm**, the folder
   `/usr/local/lib/node_modules/npm`, taken unchanged from the
-  `node:24-bookworm-slim` mirror: Node is MIT, with the licences of the
+  `node:26-trixie-slim` mirror: Node is MIT, with the licences of the
   components it bundles, and npm is Artistic-2.0, with its bundled packages'
   licences in its folder; their `LICENSE` files are at
   `/usr/share/licenses/agentry-coder/node/LICENSE` and

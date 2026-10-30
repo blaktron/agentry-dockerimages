@@ -11,8 +11,9 @@
 # Changes from upstream's Dockerfile:
 #
 #   1. Every base is an ARG, and scripts/build.sh passes our digest-pinned
-#      mirror of node:24-alpine for it, so no mutable tag is resolved at build
-#      time. Upstream resolves node:24-alpine by tag.
+#      mirror of node:26-alpine for it, so no mutable tag is resolved at build
+#      time. Upstream resolves node:24-alpine by tag; this build runs on Node
+#      26, the newest release line, for the build and the runtime alike.
 #   2. Microsoft Graph's two OpenAPI documents (v1.0 and beta), which
 #      upstream's generator downloads from msgraph-metadata's moving master
 #      branch, are fetched in a stage of their own at the pinned commit below
@@ -52,7 +53,7 @@
 # `npm run build`), the runtime's production dependencies from the same
 # lockfile, and the entrypoint, node dist/index.js.
 
-ARG NODE_IMAGE=node:24-alpine
+ARG NODE_IMAGE=node:26-alpine
 
 # Microsoft Graph's OpenAPI documents at a pinned msgraph-metadata commit.
 FROM ${NODE_IMAGE} AS openapi

@@ -43,8 +43,8 @@ list. Built images are listed with what they are built from.
 | `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
 | `agentry-alpine` | `alpine:3.24` | mirror | The runner image's runtime base, and the base of the files and host link images. |
 | `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine`, `node:26-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
-| `agentry-python-slim` | `python:3.14-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
-| `agentry-python-alpine` | `python:3.14-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
+| `agentry-python-slim` | `python:3.15-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
+| `agentry-python-alpine` | `python:3.15-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
 | `agentry-unsafe-kali` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | The base of the desktop's Unsafe Mode exec images, amd64 and arm64. |
 | `agentry-files` | `alpine:3.24` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
 | `agentry-typst` | Typst, patched, plus the Noto fonts, the report designs' font families and the cmarker package (`build/typst/`) | build | The PDF renderer's files for `export_pdf`, files only, amd64 and arm64. |
@@ -69,7 +69,7 @@ Mirrors used only as bases when building:
 | `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
 | `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
-| `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
+| `agentry-node-trixie` | `node:26-trixie-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
 
 Packages that the publishing workflows create in this public repository are
@@ -376,7 +376,7 @@ gateway and passes the settings that hold a run (proxy, tool filter, Chromium
 sandbox, output folder, secrets file).
 
 - `@playwright/mcp` is installed in `/app` with `npm ci --ignore-scripts
-  --omit=dev` on the `node:24-bookworm-slim` mirror, held by
+  --omit=dev` on the `node:26-trixie-slim` mirror, held by
   `package-lock.json` (exact versions, sha512 integrity). That mirror also
   supplies `/usr/local/bin/node`. The server depends on an exact prerelease of
   Playwright, made for an older Chromium than Debian's security archive now
@@ -442,7 +442,7 @@ mounts are the runner's settings. It holds:
 - Go, the Go project's release, in `/usr/local/go`, from the
   `golang:1.27.3-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
   asks for a newer Go fails instead of downloading a toolchain;
-- Node 24 and npm, from the `node:24-bookworm-slim` mirror;
+- Node 26 and npm, from the `node:26-trixie-slim` mirror;
 - in `/usr/local/bin`, five release binaries, each its project's static
   build, fetched over https and held to the SHA-256 that `source.env` pins
   for each architecture: `gh` (GitHub), `glab` (GitLab) and `tea` (Gitea),

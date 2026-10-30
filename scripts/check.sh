@@ -2112,8 +2112,8 @@ checkCoder() {
 			echo "$CODER_CTX/bases.env: GO_IMAGE is not golang:${GO_VERSION:-}-trixie, the Go source.env pins"
 			b=1
 		}
-		grep -qx "NODE_IMAGE=node:${NODE_MAJOR:-}-bookworm-slim" "$CODER_CTX/bases.env" || {
-			echo "$CODER_CTX/bases.env: NODE_IMAGE is not node:${NODE_MAJOR:-}-bookworm-slim, the Node source.env pins"
+		grep -qx "NODE_IMAGE=node:${NODE_MAJOR:-}-trixie-slim" "$CODER_CTX/bases.env" || {
+			echo "$CODER_CTX/bases.env: NODE_IMAGE is not node:${NODE_MAJOR:-}-trixie-slim, the Node source.env pins"
 			b=1
 		}
 		exit "$b"

@@ -10,11 +10,11 @@
 # digest.
 #
 # The server comes from package-lock.json (npm ci --ignore-scripts) on our
-# node:24-bookworm-slim mirror; Chromium, its libraries and the fonts from
+# node:26-trixie-slim mirror; Chromium, its libraries and the fonts from
 # snapshot.debian.org at source.env's timestamp, the chromium package held to
 # source.env's version and SHA-256. Those fetches happen here, once, and never
 # inside a person's run. The base mirrors (agentry-debian,
-# agentry-node-bookworm) must exist first: the images workflow mirrors the
+# agentry-node-trixie) must exist first: the images workflow mirrors the
 # named rows.
 #
 # Each architecture is built natively, amd64 on ubuntu-latest and arm64 on
