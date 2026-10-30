@@ -218,7 +218,7 @@ jobs:
           set -euo pipefail
           version=$(sed -n 's/^CODEX_VERSION=//p' build/agentry-codex/source.env)
           row=$(printf 'agentry-codex\tghcr.io/blaktron/agentry-codex:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the Codex harness image: OpenAI's Codex CLI $version release binary (musl), verified against OpenAI's sigstore signature, on our alpine:3.22 mirror, uid 10001, amd64 and arm64, signed keyless by the codex workflow (agentry-cli images.harnessImages.codex, the default for a ChatGPT model sign-in)")
+            "the Codex harness image: OpenAI's Codex CLI $version release binary (musl), verified against OpenAI's sigstore signature, on our alpine:3.24 mirror, uid 10001, amd64 and arm64, signed keyless by the codex workflow (agentry-cli images.harnessImages.codex, the default for a ChatGPT model sign-in)")
           {
             echo "### agentry-codex:$IMAGE_TAG"
             echo

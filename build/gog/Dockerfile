@@ -33,8 +33,8 @@
 # tzdata), the non-root user (uid 10001, gog), HOME, the /persist/gogcli
 # folder its documentation names as GOG_HOME, and the entrypoint.
 
-ARG GO_IMAGE=golang:1.27.3-alpine3.23
-ARG ALPINE_IMAGE=alpine:3.23
+ARG GO_IMAGE=golang:1.27.3-alpine3.24
+ARG ALPINE_IMAGE=alpine:3.24
 
 FROM ${GO_IMAGE} AS build
 ENV CGO_ENABLED=0 \

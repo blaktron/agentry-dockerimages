@@ -35,9 +35,9 @@
 # PACKAGES, one `name-version` a line, so a receipt can name them.
 #
 # scripts/build.sh passes ALPINE_IMAGE as our digest-pinned mirror of
-# alpine:3.22, the runner image's own runtime base.
+# alpine:3.24, the runner image's own runtime base.
 
-ARG ALPINE_IMAGE=alpine:3.22
+ARG ALPINE_IMAGE=alpine:3.24
 
 FROM ${ALPINE_IMAGE}
 ARG PACKAGES="pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng openjdk17-jre-headless libarchive-tools file clamav-scanner clamav-libunrar"

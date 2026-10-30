@@ -41,15 +41,15 @@ list. Built images are listed with what they are built from.
 | `agentry-mcp-gateway` | `docker/mcp-gateway` | mirror | The MCP gateway, started once per run: the run's tool plane. |
 | `agentry-docker-agent` | `docker/docker-agent` | mirror | The vendor's harness image, byte for byte, the default before the build from source; kept for comparison and for policies that pin it. |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | mirror | Builds the runner image. |
-| `agentry-alpine` | `alpine:3.22` | mirror | The runner image's runtime base, and the base of the files and host link images. |
-| `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
-| `agentry-python-slim` | `python:3.12-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
-| `agentry-python-alpine` | `python:3.12-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
+| `agentry-alpine` | `alpine:3.24` | mirror | The runner image's runtime base, and the base of the files and host link images. |
+| `agentry-node-alpine` | `node:22-alpine`, `node:24-alpine`, `node:26-alpine` | mirror | Installs and runs the npm MCP servers a QuickAgent declares. |
+| `agentry-python-slim` | `python:3.14-slim-trixie` | mirror | Installs and runs the PyPI MCP servers a QuickAgent declares (the default). Debian's glibc, so packages that publish only manylinux wheels install. |
+| `agentry-python-alpine` | `python:3.14-alpine` | mirror | The same on Alpine's musl, for runner policies that pin it. |
 | `agentry-unsafe-kali` | `kalilinux/kali-rolling` + `build/agentry-unsafe-kali/` | build | The base of the desktop's Unsafe Mode exec images, amd64 and arm64. |
-| `agentry-files` | `alpine:3.22` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
+| `agentry-files` | `alpine:3.24` + `build/agentry-files/` | build | The decoders of the runner's file decode step (pandoc, pdftotext, tesseract, Tika, bsdtar, libmagic) and its malware check (clamscan), amd64 and arm64. |
 | `agentry-typst` | Typst, patched, plus the Noto fonts, the report designs' font families and the cmarker package (`build/typst/`) | build | The PDF renderer's files for `export_pdf`, files only, amd64 and arm64. |
-| `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.22` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
-| `agentry-hostlink` | `alpine:3.22` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
+| `agentry-codex` | OpenAI's Codex CLI release binary on `alpine:3.24` (`build/agentry-codex/`) | build | The Codex harness image, used for a ChatGPT model sign-in, amd64 and arm64. |
+| `agentry-hostlink` | `alpine:3.24` + OpenSSH client (`build/agentry-hostlink/`) | build | The OpenSSH client the runner's host link reaches a target host with, amd64 and arm64. |
 | `agentry-ripgrep` | ripgrep (`build/ripgrep/`) | build | The search engine for the tools server's `grep` and `glob`, files only, amd64 and arm64. |
 | `agentry-browser` | `debian:trixie-slim` + `@playwright/mcp` + Debian's Chromium (`build/agentry-browser/`) | build | The browser server for a QuickAgent that declares `capabilities.browser`, amd64 and arm64. |
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
@@ -63,10 +63,10 @@ Mirrors used only as bases when building:
 | Image | Source | Used by |
 |---|---|---|
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
-| `agentry-harness-alpine` | `alpine:3.23` | `build/docker-agent/` and `build/gog/`: runtime base. |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | `build/docker-agent/` and `build/gog/`: compiler. |
+| `agentry-harness-alpine` | `alpine:3.24` | `build/docker-agent/` and `build/gog/`: runtime base. |
+| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
-| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
+| `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
 | `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
 | `agentry-node-bookworm` | `node:24-bookworm-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
@@ -80,7 +80,7 @@ building that context needs a `docker login ghcr.io` with read access.
 Each image is referenced by digest, for example:
 
 ```
-ghcr.io/blaktron/agentry-alpine:3.22@sha256:d406446bc05b82480756ce8f1287964d28768c23955fa9480d2a74a2eae7a654
+ghcr.io/blaktron/agentry-alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 ```
 
 The runner's operator policy can point these at another registry or pin them
@@ -290,7 +290,7 @@ Unsafe Mode is described at <https://docs.secureagentry.net/agentry/unsafe-mode/
 
 ### agentry-files
 
-`alpine:3.22` with `pandoc-cli`, `poppler-utils`, `tesseract-ocr` with English
+`alpine:3.24` with `pandoc-cli`, `poppler-utils`, `tesseract-ocr` with English
 data, Apache Tika (with `openjdk17-jre-headless`), `libarchive-tools`, `file`
 (libmagic) and `clamav-scanner` with `clamav-libunrar`, and their dependencies.
 There is no setuid or setgid file. `/etc/agentry/files/packages` lists the
@@ -309,7 +309,7 @@ The decode step and the malware checks are described at
 
 The decode container has no network, so clamscan's signatures come from
 `ghcr.io/blaktron/agentry-clamav-db`. The `clamav-db` workflow runs
-`freshclam` from the `alpine:3.22` mirror into an empty directory, keeps
+`freshclam` from the `alpine:3.24` mirror into an empty directory, keeps
 exactly `main.cvd`, `daily.cvd` and `bytecode.cvd` (Cisco Talos's signed
 CVDs, which clamscan checks again as it loads them), checks them with the
 pinned files image and no network (`scripts/check.sh --clamav-db`), and pushes
@@ -324,7 +324,7 @@ as `COPYING` inside it, and the bundle passes each CVD on unmodified.
 
 Nothing is compiled. `build/agentry-codex/` puts OpenAI's release binary
 (`codex-<arch>-unknown-linux-musl` from the GitHub release `CODEX_TAG` in
-`source.env`), unmodified, on the `alpine:3.22` mirror, running as uid 10001.
+`source.env`), unmodified, on the `alpine:3.24` mirror, running as uid 10001.
 The fetch stage (`fetch.sh`) holds the tarball to its SHA-256; verifies the
 binary against OpenAI's `.sigstore` bundle with `verify.sh` (signer: OpenAI's
 `rust-release.yml` at `refs/tags/<CODEX_TAG>`, run at `CODEX_COMMIT`); proves
@@ -346,7 +346,7 @@ at <https://docs.secureagentry.net/runner/#model-sign-ins>.
 
 ### agentry-hostlink
 
-`alpine:3.22` with `openssh-client-default` (`ssh`), `openssh-client-common`
+`alpine:3.24` with `openssh-client-default` (`ssh`), `openssh-client-common`
 (`sftp`, `ssh-keyscan`, and `scp`, `ssh-add`, `ssh-agent` from the same
 package) and `openssh-keygen`, and their dependencies. `openssh-keysign`, the
 client's one setuid program, is not installed, and there is no setuid or
@@ -359,7 +359,7 @@ It runs as uid 10001 (`hostlink`). `ssh` will not start for a uid with no
 passwd entry, so running it as another uid needs a passwd line for that uid
 bound in; and `ssh` accepts a private key of mode 0600 only when the uid
 running it owns the file. The check runs against a throwaway OpenSSH server
-(the `alpine:3.22` mirror with `openssh-server`, built by the check) on an
+(the `alpine:3.24` mirror with `openssh-server`, built by the check) on an
 internal Docker network with no route out.
 
 Target hosts are described at
@@ -533,7 +533,7 @@ is started with `--allow-write`, and sending mail only with
 `--allow-gmail-send` too. It is built rather than mirrored because gog's own
 image is amd64 only and unsigned, and its Linux release binaries carry
 checksums and no signature. `build/gog/Dockerfile` lists how it differs
-from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.23
+from the project's own Dockerfile at that commit; it uses the digest-pinned Go and Alpine 3.24
 mirrors, the project's release build settings (CGO off, `-trimpath`,
 `GOTOOLCHAIN=local`, module sums verified), keeps its licence at
 `/usr/share/licenses/gog/LICENSE`, strips setuid and setgid bits, and

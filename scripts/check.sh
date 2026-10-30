@@ -847,8 +847,8 @@ EOF
 
 	# Under strace: the image's files in a helper from our alpine mirror with
 	# strace and file. Building it needs network; the traced runs have none.
-	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print $3 }' "$MANIFEST")
-	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.22@$alpine"
+	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.24" { print $3 }' "$MANIFEST")
+	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.24@$alpine"
 	# shellcheck disable=SC2016 # ${TYPST} and ${ALPINE} are the Dockerfile's
 	if ! printf 'ARG TYPST\nARG ALPINE\nFROM ${TYPST} AS typst\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=typst /typst /typst\nCOPY --from=typst /fonts /fonts\nCOPY --from=typst /typst-packages /typst-packages\n' |
 		"$runtime" build -q ${PLATFORM:+--platform "$PLATFORM"} --build-arg TYPST="$ref" --build-arg ALPINE="$alpine" -t "$helper" - >/dev/null; then
@@ -1044,8 +1044,8 @@ EOF
 
 	# The image's files in a helper from our alpine mirror with strace and
 	# file. Building it needs network; the traced run has none.
-	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.22" { print $3 }' "$MANIFEST")
-	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.22@$alpine"
+	alpine=$(awk -F'\t' '$1 == "agentry-alpine" && $2 == "alpine:3.24" { print $3 }' "$MANIFEST")
+	alpine="${REGISTRY:-ghcr.io/blaktron}/agentry-alpine:3.24@$alpine"
 	# shellcheck disable=SC2016 # ${RG} and ${ALPINE} are the Dockerfile's
 	if ! printf 'ARG RG\nARG ALPINE\nFROM ${RG} AS rg\nFROM ${ALPINE}\nRUN apk add --no-cache strace file\nCOPY --from=rg /rg /rg\nCOPY --from=rg /licenses /licenses\n' |
 		"$runtime" build -q ${PLATFORM:+--platform "$PLATFORM"} --build-arg RG="$ref" --build-arg ALPINE="$alpine" -t "$helper" - >/dev/null; then

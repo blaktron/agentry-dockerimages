@@ -103,7 +103,7 @@ jobs:
           fi
           echo "TAG=$tag" >>"$GITHUB_ENV"
 
-      # freshclam from Alpine 3.22, the files image's own base and ClamAV
+      # freshclam from Alpine 3.24, the files image's own base and ClamAV
       # version, run from our mirror of that base, into an empty directory.
       - name: Fetch the signature databases with freshclam
         run: |

@@ -168,23 +168,24 @@ naming them — see each upstream repository.
 
 | Our image | Upstream | Licence |
 |---|---|---|
-| `agentry-mcp-gateway` | `docker/mcp-gateway:v0.43.3` | see upstream |
-| `agentry-docker-agent` | `docker/docker-agent:1.152.0` | Apache-2.0 |
+| `agentry-mcp-gateway` | `docker/mcp-gateway:v0.44.3` | see upstream |
+| `agentry-docker-agent` | `docker/docker-agent:1.154.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | see upstream (Go: BSD-3; Alpine: MIT) |
-| `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
-| `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
+| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | see upstream (Go: BSD-3; Alpine: MIT) |
+| `agentry-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
+| `agentry-harness-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
-| `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
-| `agentry-python-slim` | `python:3.12-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-node-alpine` | `node:26-alpine` | see upstream (Node.js: MIT) |
+| `agentry-python-alpine` | `python:3.14-alpine` | see upstream (Python: PSF) |
+| `agentry-python-slim` | `python:3.14-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
 | `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
-| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.3` | see upstream (cosign: Apache-2.0) |
+| `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.4` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
-| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
+| `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | MinIO: GNU AGPL-3.0; its source is below |
 
 "See upstream" means this repository has not audited the full dependency licence
@@ -217,7 +218,7 @@ package database (`/var/lib/dpkg/status` on Debian and Kali,
 - Alpine (the `agentry-*alpine*` images, `agentry-codex`, `agentry-hostlink`,
   `agentry-files`): the package recipes (`APKBUILD`) and patches in
   https://github.com/alpinelinux/aports at the branch named for the
-  release in the image's `/etc/alpine-release`, for example `3.22-stable`;
+  release in the image's `/etc/alpine-release`, for example `3.24-stable`;
   each recipe names the upstream source archive it builds.
 
 ## Source of MinIO (agentry-minio)
@@ -228,12 +229,12 @@ licensed under the GNU Affero General Public License, version 3
 a separate service of the compose stack, and nothing of ours is linked into it.
 The binary in the pinned digest reports itself as:
 
-    minio version RELEASE.2026-09-22T19-25-18Z (commit-id=df34868a88cc8c396807e04a7e220810b321bdaa)
+    minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)
 
 Its corresponding source:
 
-- MinIO at that commit: https://github.com/minio/minio/tree/df34868a88cc8c396807e04a7e220810b321bdaa
-  (the release tag `RELEASE.2026-09-22T19-25-18Z` names the same commit).
+- MinIO at that commit: https://github.com/minio/minio/tree/76c06ff1d2cc844050fdeb1d54bf8fa70db72278
+  (the release tag `RELEASE.2026-10-23T20-06-51Z` names the same commit).
 - How Chainguard builds and packages it: the `minio` package recipe in
   https://github.com/wolfi-dev/os, and the image definition at
   https://github.com/chainguard-images/images/tree/main/images/minio. The

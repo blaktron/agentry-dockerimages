@@ -188,7 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-gog\tghcr.io/blaktron/agentry-gog:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the Google Workspace MCP server: gog mcp, built from its pinned upstream commit (build/gog/), on our alpine:3.23 mirror, uid 10001, its tools annotated read-only unless started with --allow-write, amd64 and arm64, signed keyless by the gog workflow (agentry-cli policy.DefaultGogImage)")
+            "the Google Workspace MCP server: gog mcp, built from its pinned upstream commit (build/gog/), on our alpine:3.24 mirror, uid 10001, its tools annotated read-only unless started with --allow-write, amd64 and arm64, signed keyless by the gog workflow (agentry-cli policy.DefaultGogImage)")
           {
             echo "### agentry-gog:$IMAGE_TAG"
             echo
