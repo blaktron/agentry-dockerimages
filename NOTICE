@@ -234,7 +234,8 @@ The binary in the pinned digest reports itself as:
 Its corresponding source:
 
 - MinIO at that commit: https://github.com/minio/minio/tree/76c06ff1d2cc844050fdeb1d54bf8fa70db72278
-  (the release tag `RELEASE.2026-10-23T20-06-51Z` names the same commit).
+  (upstream publishes no tag for `RELEASE.2026-10-23T20-06-51Z`; the commit
+  is the one the binary reports).
 - How Chainguard builds and packages it: the `minio` package recipe in
   https://github.com/wolfi-dev/os, and the image definition at
   https://github.com/chainguard-images/images/tree/main/images/minio. The
