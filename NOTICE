@@ -58,7 +58,7 @@ upstream component.
 ### gog
 
     Upstream:   https://github.com/openclaw/gogcli
-    Commit:     e0e3cb9c80eb4f1fb8051766e52841b8cd7ab965  (tag v0.46.0)
+    Commit:     cbb7f01f76fa8a815aec4b21b64395d87e454bbb  (tag v0.47.1)
     Licence:    MIT
     Our image:  agentry-gog
     Context:    build/gog/
@@ -74,7 +74,7 @@ own) keep their licences.
 ### ms-365-mcp-server
 
     Upstream:   https://github.com/Softeria/ms-365-mcp-server
-    Commit:     8eab9d6e833ce0e476ea4e9d345b714630e6d14f  (tag v0.171.0)
+    Commit:     621135a175cbd9b8b98d083bcaafeb5b7d083c64  (tag v0.177.0)
     Licence:    MIT
     Our image:  agentry-ms365
     Context:    build/ms365/
