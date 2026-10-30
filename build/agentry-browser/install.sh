@@ -49,16 +49,6 @@ esac
 [ "${CHROMIUM_DEB_VERSION%%-*}" = "$CHROMIUM_VERSION" ] ||
 	refuse "CHROMIUM_DEB_VERSION $CHROMIUM_DEB_VERSION is not a package of Chromium $CHROMIUM_VERSION"
 
-# browsers.json is the lockfile's playwright-core's own: the Chromium build
-# that Playwright release was made against.
-want=$(node -e '
-const b = require(process.argv[1]).browsers.find(b => b.name === "chromium");
-console.log(b.browserVersion.split(".")[0]);
-' "$browsers")
-have="${CHROMIUM_VERSION%%.*}"
-[ "$have" = "$want" ] || [ "$have" = "$((want - 1))" ] ||
-	refuse "Playwright $PLAYWRIGHT_VERSION was made for Chromium $want; source.env pins $CHROMIUM_VERSION"
-
 rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*
 cat >/etc/apt/sources.list.d/snapshot.sources <<SOURCES
 Types: deb
@@ -117,11 +107,23 @@ echo "$sum  $deb" | sha256sum -c - || refuse "$deb does not match source.env's S
 echo "$commonSum  $common" | sha256sum -c - || refuse "$common does not match source.env's SHA-256"
 
 # The fonts Playwright installs beside its own Chromium on Debian 13, without
-# the X server: the browser runs headless.
+# the X server: the browser runs headless. libatomic1 is the one library the
+# node binary taken from NODE_IMAGE links that this base does not carry.
 fonts="fonts-liberation fonts-noto-color-emoji fonts-unifont xfonts-scalable fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf fonts-freefont-ttf"
 # shellcheck disable=SC2086 # $apt and $fonts are word lists
-retry $apt install -y "$deb" "$common" $fonts || refuse "installing chromium $CHROMIUM_DEB_VERSION failed"
+retry $apt install -y "$deb" "$common" $fonts libatomic1 || refuse "installing chromium $CHROMIUM_DEB_VERSION failed"
 rm -rf "$work" /var/lib/apt/lists/* /var/cache/apt/archives/*.deb
+
+# browsers.json is the lockfile's playwright-core's own: the Chromium build
+# that Playwright release was made against. Node, which reads it, links
+# libatomic1, so this runs once that package is installed.
+want=$(node -e '
+const b = require(process.argv[1]).browsers.find(b => b.name === "chromium");
+console.log(b.browserVersion.split(".")[0]);
+' "$browsers")
+have="${CHROMIUM_VERSION%%.*}"
+[ "$have" = "$want" ] || [ "$have" = "$((want - 1))" ] ||
+	refuse "Playwright $PLAYWRIGHT_VERSION was made for Chromium $want; source.env pins $CHROMIUM_VERSION"
 
 for p in chromium chromium-common; do
 	[ "$(dpkg-query -W -f '${Version}' "$p")" = "$CHROMIUM_DEB_VERSION" ] ||

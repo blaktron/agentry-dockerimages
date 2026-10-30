@@ -1,8 +1,8 @@
 diff --git a/pkg/agent/agent.go b/pkg/agent/agent.go
-index 06001c3..424bf53 100644
+index 61ab43c71..3948ceec0 100644
 --- a/pkg/agent/agent.go
 +++ b/pkg/agent/agent.go
-@@ -51,6 +51,7 @@ type Agent struct {
+@@ -52,6 +52,7 @@ type Agent struct {
  	maxConsecutiveToolCalls int
  	maxOldToolCallTokens    int
  	maxToolResultTokens     int
@@ -10,7 +10,7 @@ index 06001c3..424bf53 100644
  	numHistoryItems         int
  	addPromptFiles          []string
  	addPromptFilesDepth     int
-@@ -148,6 +149,12 @@ func (a *Agent) MaxToolResultTokens() int {
+@@ -150,6 +151,12 @@ func (a *Agent) MaxToolResultTokens() int {
  	return a.maxToolResultTokens
  }
  
@@ -24,10 +24,10 @@ index 06001c3..424bf53 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index 528aebc..a6c569b 100644
+index adafe7b28..66f28c6d3 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -254,6 +254,42 @@ func WithMaxToolResultTokens(n int) Opt {
+@@ -262,6 +262,42 @@ func WithMaxToolResultTokens(n int) Opt {
  	}
  }
  
@@ -72,7 +72,7 @@ index 528aebc..a6c569b 100644
  		a.numHistoryItems = numHistoryItems
 diff --git a/pkg/config/latest/cold_cache_clear_test.go b/pkg/config/latest/cold_cache_clear_test.go
 new file mode 100644
-index 0000000..c6dff67
+index 000000000..c6dff67e3
 --- /dev/null
 +++ b/pkg/config/latest/cold_cache_clear_test.go
 @@ -0,0 +1,53 @@
@@ -130,7 +130,7 @@ index 0000000..c6dff67
 +	}
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index fd20c96..ed33918 100644
+index fd20c9636..ed33918ec 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
 @@ -533,6 +533,19 @@ type FallbackConfig struct {
@@ -165,7 +165,7 @@ index fd20c96..ed33918 100644
  	// the proactive threshold trigger and the post-overflow auto-recovery.
  	// Manual /compact stays available regardless. Pointer (tri-state) so
 diff --git a/pkg/config/latest/validate.go b/pkg/config/latest/validate.go
-index 5535d88..99fe597 100644
+index 5535d8859..99fe5975e 100644
 --- a/pkg/config/latest/validate.go
 +++ b/pkg/config/latest/validate.go
 @@ -87,6 +87,9 @@ func (t *Config) Validate() error {
@@ -206,7 +206,7 @@ index 5535d88..99fe597 100644
  		return nil
 diff --git a/pkg/runtime/coldclear.go b/pkg/runtime/coldclear.go
 new file mode 100644
-index 0000000..170e444
+index 000000000..170e44459
 --- /dev/null
 +++ b/pkg/runtime/coldclear.go
 @@ -0,0 +1,35 @@
@@ -247,7 +247,7 @@ index 0000000..170e444
 +}
 diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
 new file mode 100644
-index 0000000..613e68a
+index 000000000..613e68ab4
 --- /dev/null
 +++ b/pkg/runtime/coldclear_test.go
 @@ -0,0 +1,200 @@
@@ -452,10 +452,10 @@ index 0000000..613e68a
 +	}
 +}
 diff --git a/pkg/runtime/loop.go b/pkg/runtime/loop.go
-index d56b52e..c94a792 100644
+index 1bf319425..4ef534581 100644
 --- a/pkg/runtime/loop.go
 +++ b/pkg/runtime/loop.go
-@@ -488,6 +488,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
+@@ -369,6 +369,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
  		}
  	}
  
@@ -469,7 +469,7 @@ index d56b52e..c94a792 100644
  	if a.HasHarness() {
 diff --git a/pkg/session/coldclear.go b/pkg/session/coldclear.go
 new file mode 100644
-index 0000000..c0ef95a
+index 000000000..c0ef95ab4
 --- /dev/null
 +++ b/pkg/session/coldclear.go
 @@ -0,0 +1,196 @@
@@ -671,7 +671,7 @@ index 0000000..c0ef95a
 +}
 diff --git a/pkg/session/coldclear_test.go b/pkg/session/coldclear_test.go
 new file mode 100644
-index 0000000..a3b6a68
+index 000000000..a3b6a68f6
 --- /dev/null
 +++ b/pkg/session/coldclear_test.go
 @@ -0,0 +1,213 @@
@@ -889,10 +889,10 @@ index 0000000..a3b6a68
 +	assert.Equal(t, coldBase.Add(3*time.Minute), at)
 +}
 diff --git a/pkg/session/session.go b/pkg/session/session.go
-index 4bbd5a6..d68ed24 100644
+index 2cb3db3f3..47e0987b1 100644
 --- a/pkg/session/session.go
 +++ b/pkg/session/session.go
-@@ -2360,6 +2360,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
+@@ -2363,6 +2363,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
  // on the same session.
  func (s *Session) CompactionInput() ([]chat.Message, []int, int) {
  	items := s.snapshotItems()
@@ -900,7 +900,7 @@ index 4bbd5a6..d68ed24 100644
  
  	lastSummaryIndex := -1
  	for i := range slices.Backward(items) {
-@@ -2502,6 +2503,7 @@ func (s *Session) getMessages(a *agent.Agent, state *InstructionContextState, ex
+@@ -2505,6 +2506,7 @@ func (s *Session) getMessages(a *agent.Agent, state *InstructionContextState, ex
  	// Take a snapshot of Messages under the lock, copying Message structs
  	// to avoid racing with UpdateMessage which may modify the pointed-to objects.
  	items := s.snapshotItems()
@@ -909,10 +909,10 @@ index 4bbd5a6..d68ed24 100644
  	var instructionUpdates []InstructionUpdate
  	if state != nil {
 diff --git a/pkg/teamloader/teamloader.go b/pkg/teamloader/teamloader.go
-index 80f03b7..a8c6a55 100644
+index 809d7477b..fb5c96e78 100644
 --- a/pkg/teamloader/teamloader.go
 +++ b/pkg/teamloader/teamloader.go
-@@ -445,6 +445,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
+@@ -446,6 +446,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
  			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
  			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
  			agent.WithMaxToolResultTokens(agentConfig.MaxToolResultTokens),

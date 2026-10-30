@@ -35,9 +35,9 @@
 # PACKAGES, one `name-version` a line, so a receipt can name them.
 #
 # scripts/build.sh passes ALPINE_IMAGE as our digest-pinned mirror of
-# alpine:3.22, the runner image's own runtime base.
+# alpine:3.24, the runner image's own runtime base.
 
-ARG ALPINE_IMAGE=alpine:3.22
+ARG ALPINE_IMAGE=alpine:3.24
 
 FROM ${ALPINE_IMAGE}
 ARG PACKAGES="pandoc-cli poppler-utils tesseract-ocr tesseract-ocr-data-eng openjdk17-jre-headless libarchive-tools file clamav-scanner clamav-libunrar"
@@ -53,13 +53,20 @@ RUN for try in 1 2 3 4 5; do \
 	&& apk list --installed $PACKAGES | cut -d' ' -f1 >/etc/agentry/files/packages \
 	&& set -- $PACKAGES && test "$(wc -l </etc/agentry/files/packages)" -eq "$#"
 
-# Tika's runnable jar includes its parser dependencies. Pin the Apache release
-# by SHA-512; a mirror returning different bytes fails the build.
-ARG TIKA_VERSION=3.3.2
-ARG TIKA_SHA512=88c2032cba0d45feea361e6eebd2918bd04707614cdda5d89a1b167da5503c98e7b4cd368336f0402d559abcaf5006fcc7c825c32c749ae0417ea2f3b8423aba
-ADD https://repo.maven.apache.org/maven2/org/apache/tika/tika-app/${TIKA_VERSION}/tika-app-${TIKA_VERSION}.jar /opt/tika/tika-app.jar
-RUN echo "$TIKA_SHA512  /opt/tika/tika-app.jar" | sha512sum -c - \
-    && chmod 644 /opt/tika/tika-app.jar \
+# Tika's application distribution: the runnable tika-app jar and the lib/
+# directory of parser jars its manifest names, as Apache publishes them in one
+# zip. Pin the Apache release by SHA-512; a mirror returning different bytes
+# fails the build. /opt/tika/tika-app.jar is the path the decode step runs.
+ARG TIKA_VERSION=4.2.0
+ARG TIKA_SHA512=a9966e238fc0178a4ba3e7dd870c7b59894a16ec7759fc5582d62d0ecf9006b84e8ec97270ec2c3c0171acd57ef6ed351d55fa6884a4e52f2635fd148652bf0f
+ADD https://archive.apache.org/dist/tika/${TIKA_VERSION}/tika-app-${TIKA_VERSION}.zip /tmp/tika-app.zip
+RUN echo "$TIKA_SHA512  /tmp/tika-app.zip" | sha512sum -c - \
+    && mkdir -p /opt/tika \
+    && bsdtar -xf /tmp/tika-app.zip -C /opt/tika \
+    && rm /tmp/tika-app.zip \
+    && ln -s "tika-app-${TIKA_VERSION}.jar" /opt/tika/tika-app.jar \
+    && chmod -R u=rwX,go=rX /opt/tika \
+    && test -f "/opt/tika/tika-app-${TIKA_VERSION}.jar" \
     && printf 'tika-app-%s\n' "$TIKA_VERSION" >>/etc/agentry/files/packages
 COPY tika-app /usr/bin/tika-app
 RUN chmod 755 /usr/bin/tika-app

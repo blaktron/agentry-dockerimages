@@ -49,7 +49,7 @@
 
 ARG DEBIAN_IMAGE=debian:trixie-slim
 ARG GO_IMAGE=golang:1.27.3-trixie
-ARG NODE_IMAGE=node:24-bookworm-slim
+ARG NODE_IMAGE=node:26-trixie-slim
 
 FROM ${GO_IMAGE} AS go
 FROM ${NODE_IMAGE} AS node

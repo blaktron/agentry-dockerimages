@@ -11,11 +11,11 @@
 #
 # The Debian packages come from snapshot.debian.org at source.env's
 # timestamp, its signed indexes held to their SHA-256; Go from our
-# golang:1.27.3-trixie mirror and Node and npm from our node:24-bookworm-slim
+# golang:1.27.3-trixie mirror and Node and npm from our node:26-trixie-slim
 # mirror, each held to source.env; gh, glab, tea, osv-scanner and gitleaks
 # from their projects' releases, each held to its SHA-256 in source.env.
 # Those fetches happen here, once, and never inside a person's run. The base
-# mirrors (agentry-debian, agentry-golang-trixie, agentry-node-bookworm) must
+# mirrors (agentry-debian, agentry-golang-trixie, agentry-node-trixie) must
 # exist first: the images workflow mirrors the named rows.
 #
 # Each architecture is built natively, amd64 on ubuntu-latest and arm64 on

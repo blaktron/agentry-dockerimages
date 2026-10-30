@@ -28,13 +28,23 @@
 #   5. The runtime stage strips every setuid and setgid bit, and keeps gog's
 #      licence at /usr/share/licenses/gog/LICENSE.
 #   6. The image's labels name this build.
+#   7. golang.org/x/net is raised from upstream's v0.61.0 to v0.62.0 before
+#      the build, the release that fixes GO-2026-6860, which govulncheck
+#      reports as reachable through html.Parse in the Gmail compose text
+#      conversion (quadratic time on crafted HTML). `go get` raises only what
+#      that module requires, from the same proxy and checksum database as the
+#      rest of the build, and `go mod verify` follows; `go version -m
+#      /usr/local/bin/gog` shows the result.
+#   8. Upstream upgrades ca-certificates to a version it names, in the builder
+#      and in the runtime stage; here the runtime stage installs the
+#      current certificate package of its Alpine base's index.
 #
 # Everything else matches upstream: the runtime packages (ca-certificates,
 # tzdata), the non-root user (uid 10001, gog), HOME, the /persist/gogcli
 # folder its documentation names as GOG_HOME, and the entrypoint.
 
-ARG GO_IMAGE=golang:1.27.3-alpine3.23
-ARG ALPINE_IMAGE=alpine:3.23
+ARG GO_IMAGE=golang:1.27.3-alpine3.24
+ARG ALPINE_IMAGE=alpine:3.24
 
 FROM ${GO_IMAGE} AS build
 ENV CGO_ENABLED=0 \
@@ -50,6 +60,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 COPY . .
+RUN go get golang.org/x/net@v0.62.0 && go mod verify
 ARG GIT_TAG
 ARG GIT_COMMIT
 RUN go build -trimpath \

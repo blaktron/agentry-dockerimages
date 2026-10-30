@@ -14,7 +14,7 @@ terms are restated here.
 ### Docker Agent
 
     Upstream:   https://github.com/docker/docker-agent
-    Commit:     e7f1ec394dfa47aea0b066092a35c72564b192cb  (tag v1.152.0)
+    Commit:     b8fce99da4f6ee28af41a2d1e181296c8f17765e  (tag v1.154.0)
     Licence:    Apache-2.0
     Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
@@ -37,8 +37,9 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    the darwin/windows paths) are dropped; this builds Linux only. The binary is
    still CGO with external linking and still asserted static.
 5. otel's `otlptracegrpc` exporter is raised before the build from v1.40.0 to
-   v1.45.0, the first release that fixes advisories reported against
-   upstream's pin. `go.mod` and `go.sum` in the build are changed by `go get`.
+   v1.47.0 and `golang.org/x/net` from v0.61.0 to v0.62.0, the releases that
+   fix advisories reported against upstream's pins. `go.mod` and `go.sum` in
+   the build are changed by `go get`.
 6. `build/docker-agent/cold-cache-clear.patch` is applied before the build. It
    adds the agent setting `cold_cache_clear`, which replaces old tool results
    in the history sent to the model with a placeholder after the provider's
@@ -57,7 +58,7 @@ upstream component.
 ### gog
 
     Upstream:   https://github.com/openclaw/gogcli
-    Commit:     e0e3cb9c80eb4f1fb8051766e52841b8cd7ab965  (tag v0.46.0)
+    Commit:     cbb7f01f76fa8a815aec4b21b64395d87e454bbb  (tag v0.47.1)
     Licence:    MIT
     Our image:  agentry-gog
     Context:    build/gog/
@@ -73,7 +74,7 @@ own) keep their licences.
 ### ms-365-mcp-server
 
     Upstream:   https://github.com/Softeria/ms-365-mcp-server
-    Commit:     8eab9d6e833ce0e476ea4e9d345b714630e6d14f  (tag v0.171.0)
+    Commit:     621135a175cbd9b8b98d083bcaafeb5b7d083c64  (tag v0.177.0)
     Licence:    MIT
     Our image:  agentry-ms365
     Context:    build/ms365/
@@ -168,23 +169,24 @@ naming them — see each upstream repository.
 
 | Our image | Upstream | Licence |
 |---|---|---|
-| `agentry-mcp-gateway` | `docker/mcp-gateway:v0.43.3` | see upstream |
-| `agentry-docker-agent` | `docker/docker-agent:1.152.0` | Apache-2.0 |
+| `agentry-mcp-gateway` | `docker/mcp-gateway:v0.44.3` | see upstream |
+| `agentry-docker-agent` | `docker/docker-agent:1.154.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.23` | see upstream (Go: BSD-3; Alpine: MIT) |
-| `agentry-alpine` | `alpine:3.22` | see upstream (Alpine Linux) |
-| `agentry-harness-alpine` | `alpine:3.23` | see upstream (Alpine Linux) |
+| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | see upstream (Go: BSD-3; Alpine: MIT) |
+| `agentry-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
+| `agentry-harness-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
 | `agentry-node-alpine` | `node:24-alpine` | see upstream (Node.js: MIT) |
-| `agentry-python-alpine` | `python:3.12-alpine` | see upstream (Python: PSF) |
-| `agentry-python-slim` | `python:3.12-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
-| `agentry-node-bookworm` | `node:24-bookworm-slim` | see upstream (Node.js: MIT; Debian bookworm packages, each under its own licence) |
+| `agentry-node-alpine` | `node:26-alpine` | see upstream (Node.js: MIT) |
+| `agentry-python-alpine` | `python:3.15-alpine` | see upstream (Python: PSF) |
+| `agentry-python-slim` | `python:3.15-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
+| `agentry-node-trixie` | `node:26-trixie-slim` | see upstream (Node.js: MIT; Debian trixie packages, each under its own licence) |
 | `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.4` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
-| `agentry-rust-alpine` | `rust:1.98.1-alpine3.22` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
+| `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | see upstream (Rust: MIT or Apache-2.0; Alpine: MIT) |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | MinIO: GNU AGPL-3.0; its source is below |
 
 "See upstream" means this repository has not audited the full dependency licence
@@ -203,8 +205,8 @@ package database (`/var/lib/dpkg/status` on Debian and Kali,
 `/lib/apk/db/installed` on Alpine) and its licence in
 `/usr/share/doc/<package>/copyright` (Debian, Kali).
 
-- Debian (`agentry-python-slim`, `agentry-debian` and `agentry-browser`,
-  trixie; `agentry-node-bookworm`, bookworm): https://sources.debian.org/ for
+- Debian (`agentry-python-slim`, `agentry-debian`, `agentry-node-trixie` and
+  `agentry-browser`, trixie): https://sources.debian.org/ for
   browsing, https://deb.debian.org/debian/pool/ for the source archives, and
   https://snapshot.debian.org/ for a version that is no longer in the
   archive. `agentry-browser`'s packages all come from the snapshot named in
@@ -217,7 +219,7 @@ package database (`/var/lib/dpkg/status` on Debian and Kali,
 - Alpine (the `agentry-*alpine*` images, `agentry-codex`, `agentry-hostlink`,
   `agentry-files`): the package recipes (`APKBUILD`) and patches in
   https://github.com/alpinelinux/aports at the branch named for the
-  release in the image's `/etc/alpine-release`, for example `3.22-stable`;
+  release in the image's `/etc/alpine-release`, for example `3.24-stable`;
   each recipe names the upstream source archive it builds.
 
 ## Source of MinIO (agentry-minio)
@@ -228,12 +230,13 @@ licensed under the GNU Affero General Public License, version 3
 a separate service of the compose stack, and nothing of ours is linked into it.
 The binary in the pinned digest reports itself as:
 
-    minio version RELEASE.2026-09-22T19-25-18Z (commit-id=df34868a88cc8c396807e04a7e220810b321bdaa)
+    minio version RELEASE.2026-10-23T20-06-51Z (commit-id=76c06ff1d2cc844050fdeb1d54bf8fa70db72278)
 
 Its corresponding source:
 
-- MinIO at that commit: https://github.com/minio/minio/tree/df34868a88cc8c396807e04a7e220810b321bdaa
-  (the release tag `RELEASE.2026-09-22T19-25-18Z` names the same commit).
+- MinIO at that commit: https://github.com/minio/minio/tree/76c06ff1d2cc844050fdeb1d54bf8fa70db72278
+  (upstream publishes no tag for `RELEASE.2026-10-23T20-06-51Z`; the commit
+  is the one the binary reports).
 - How Chainguard builds and packages it: the `minio` package recipe in
   https://github.com/wolfi-dev/os, and the image definition at
   https://github.com/chainguard-images/images/tree/main/images/minio. The
@@ -253,9 +256,11 @@ own binary, under that repository's licence. This repository changes where their
 
 ## agentry-files
 
-Apache Tika 3.3.2 (https://tika.apache.org), distributed unchanged as its
-SHA-512-pinned tika-app jar, is Apache-2.0. Its LICENSE and NOTICE, including
-its dependencies' notices, are preserved in the jar's META-INF directory.
+Apache Tika 4.2.0 (https://tika.apache.org), distributed unchanged as its
+SHA-512-pinned tika-app zip (the tika-app jar and the parser jars in its lib
+directory), is Apache-2.0. Its LICENSE and NOTICE sit beside the jar in
+/opt/tika, and its dependencies' notices are preserved in the jars' META-INF
+directories.
 OpenJDK, libarchive, libmagic and ClamAV (clamav-scanner, clamav-libunrar
 and their dependency freshclam, GPL-2.0-only as Alpine packages them) are
 installed from Alpine with their own package licences. The wrapper we add is ours, under MIT.
@@ -276,7 +281,7 @@ Each carries its licence, the GNU GPL version 2, as COPYING inside it.
 ## agentry-codex
 
     Upstream:   https://github.com/openai/codex
-    Release:    rust-v0.162.0 (commit c1382380de69521303b416720a52f42d51af6248)
+    Release:    rust-v0.166.0 (commit 6ff1e1ca3b30fc8b914720681fcf5fe62e95f856)
     Licence:    Apache-2.0
     Our image:  agentry-codex
     Context:    build/agentry-codex/
@@ -346,8 +351,8 @@ it, and under which terms:
   `build/agentry-browser/source.env`; their names and versions are recorded
   in `/etc/agentry/browser/packages`. Their source is in Debian's archive
   (see "Source of the GPL and LGPL packages").
-- **Chromium** 155.0.8059.79, Debian's `chromium` package
-  155.0.8059.79-1~deb13u1 (with `chromium-common`), built by Debian from the
+- **Chromium** 156.0.8078.73, Debian's `chromium` package
+  156.0.8078.73-1~deb13u1 (with `chromium-common`), built by Debian from the
   source of the Chromium open-source project
   (https://www.chromium.org/), installed unchanged in `/usr/lib/chromium/` and
   held to the package SHA-256s in `build/agentry-browser/source.env`.
@@ -359,17 +364,18 @@ it, and under which terms:
   (`chrome://credits`). It comes from Debian's main archive, which holds only
   free software, and carries no Widevine CDM. Its source: Debian's `chromium` source package at
   that version, from
-  https://snapshot.debian.org/package/chromium/155.0.8059.79-1~deb13u1/
+  https://snapshot.debian.org/package/chromium/156.0.8078.73-1~deb13u1/
   (or https://sources.debian.org/src/chromium/ while the version is current),
   which is Chromium's released source with Debian's patches. The build adds
   one file, the Chromium policy at
   `/etc/chromium/policies/managed/agentry.json`.
-- **Node.js** 24, the one file `/usr/local/bin/node`, taken from the
-  `node:24-bookworm-slim` mirror: MIT, with the licences of the components it
+- **Node.js** 26, the one file `/usr/local/bin/node`, taken from the
+  `node:26-trixie-slim` mirror: MIT, with the licences of the components it
   bundles; Node's `LICENSE` is at
   `/usr/share/licenses/agentry-browser/node/LICENSE`.
-- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** (with `playwright`),
-  copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
+- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** 1.64.1 (with
+  `playwright` 1.64.1, which the build's `overrides` put in place of the
+  prerelease the server names), copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
   without change, in `/app`. Each package's `LICENSE` is under
   `/usr/share/licenses/agentry-browser/`, and playwright-core's `NOTICE` and
   `ThirdPartyNotices.txt` (the notices of its bundled third-party code) are in
@@ -403,9 +409,9 @@ The Coding agent's toolchain image. What is in it, and under which terms:
   `/usr/local/go` taken unchanged from the `golang:1.27.3-trixie` mirror:
   BSD-3-Clause, with Go's `LICENSE` and `PATENTS` at
   `/usr/share/licenses/agentry-coder/go/`.
-- **Node.js** 24, the file `/usr/local/bin/node`, and **npm**, the folder
+- **Node.js** 26, the file `/usr/local/bin/node`, and **npm**, the folder
   `/usr/local/lib/node_modules/npm`, taken unchanged from the
-  `node:24-bookworm-slim` mirror: Node is MIT, with the licences of the
+  `node:26-trixie-slim` mirror: Node is MIT, with the licences of the
   components it bundles, and npm is Artistic-2.0, with its bundled packages'
   licences in its folder; their `LICENSE` files are at
   `/usr/share/licenses/agentry-coder/node/LICENSE` and

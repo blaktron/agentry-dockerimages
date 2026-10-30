@@ -7,7 +7,7 @@
 # that exists, so a rebuild is a new tag and a new digest; the agentry-files
 # row in images.tsv then takes it, and the CLI pins that digest.
 #
-# The image is Alpine (our mirror of alpine:3.22, the runner image's own
+# The image is Alpine (our mirror of alpine:3.24, the runner image's own
 # runtime base) with the decoders added by apk. The CDN fetch happens here,
 # once, and never inside a person's run.
 #

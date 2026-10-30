@@ -9,7 +9,7 @@
 # agentry-hostlink row in images.tsv then takes it, and the CLI pins that
 # digest.
 #
-# The image is Alpine (our mirror of alpine:3.22, the runner image's own
+# The image is Alpine (our mirror of alpine:3.24, the runner image's own
 # runtime base) with the OpenSSH client added by apk. The CDN fetch happens
 # here, once, and never inside a person's run.
 #
@@ -194,7 +194,7 @@ jobs:
         run: |
           set -euo pipefail
           row=$(printf 'agentry-hostlink\tghcr.io/blaktron/agentry-hostlink:%s\t%s\tbuild\t%s' "$IMAGE_TAG" "$DIGEST" \
-            "the host link image: the OpenSSH client (ssh, sftp, ssh-keyscan, ssh-keygen) the runner's host link reaches a target host with, on our alpine:3.22 mirror, uid 10001, amd64 and arm64, signed keyless by the hostlink workflow (agentry-cli's host link)")
+            "the host link image: the OpenSSH client (ssh, sftp, ssh-keyscan, ssh-keygen) the runner's host link reaches a target host with, on our alpine:3.24 mirror, uid 10001, amd64 and arm64, signed keyless by the hostlink workflow (agentry-cli's host link)")
           {
             echo "### agentry-hostlink:$IMAGE_TAG"
             echo

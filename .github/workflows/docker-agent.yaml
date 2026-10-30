@@ -5,7 +5,7 @@
 # Dispatched by hand, from main only: a run with packages: write can push any
 # tag this repository's packages hold, so a branch's workflow file never gets
 # that. Each run is tagged with the upstream version, its UTC date and its run
-# number (1.152.0-2026.10.24.1) and refuses a tag that exists, so a rebuild is
+# number (1.154.0-2026.10.30.1) and refuses a tag that exists, so a rebuild is
 # a new tag and a new digest; the agentry-docker-agent-src row in images.tsv
 # then takes it, and the CLI pins that digest.
 #

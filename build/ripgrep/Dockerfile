@@ -32,7 +32,7 @@
 # No `# syntax=` line: the Dockerfile frontend built into BuildKit reads this,
 # so no frontend image is pulled from a floating tag.
 
-ARG RUST_IMAGE=rust:1.98.1-alpine3.22
+ARG RUST_IMAGE=rust:1.99.1-alpine3.24
 
 FROM ${RUST_IMAGE} AS builder
 # gcc, musl-dev and binutils (readelf) are in the base; make, which jemalloc's
