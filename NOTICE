@@ -351,8 +351,8 @@ it, and under which terms:
   `build/agentry-browser/source.env`; their names and versions are recorded
   in `/etc/agentry/browser/packages`. Their source is in Debian's archive
   (see "Source of the GPL and LGPL packages").
-- **Chromium** 155.0.8059.79, Debian's `chromium` package
-  155.0.8059.79-1~deb13u1 (with `chromium-common`), built by Debian from the
+- **Chromium** 156.0.8078.73, Debian's `chromium` package
+  156.0.8078.73-1~deb13u1 (with `chromium-common`), built by Debian from the
   source of the Chromium open-source project
   (https://www.chromium.org/), installed unchanged in `/usr/lib/chromium/` and
   held to the package SHA-256s in `build/agentry-browser/source.env`.
@@ -364,7 +364,7 @@ it, and under which terms:
   (`chrome://credits`). It comes from Debian's main archive, which holds only
   free software, and carries no Widevine CDM. Its source: Debian's `chromium` source package at
   that version, from
-  https://snapshot.debian.org/package/chromium/155.0.8059.79-1~deb13u1/
+  https://snapshot.debian.org/package/chromium/156.0.8078.73-1~deb13u1/
   (or https://sources.debian.org/src/chromium/ while the version is current),
   which is Chromium's released source with Debian's patches. The build adds
   one file, the Chromium policy at
@@ -373,8 +373,9 @@ it, and under which terms:
   `node:24-bookworm-slim` mirror: MIT, with the licences of the components it
   bundles; Node's `LICENSE` is at
   `/usr/share/licenses/agentry-browser/node/LICENSE`.
-- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** (with `playwright`),
-  copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
+- **`@playwright/mcp`** 0.0.83 and **`playwright-core`** 1.64.1 (with
+  `playwright` 1.64.1, which the build's `overrides` put in place of the
+  prerelease the server names), copyright Microsoft Corporation: Apache-2.0, installed from the lockfile
   without change, in `/app`. Each package's `LICENSE` is under
   `/usr/share/licenses/agentry-browser/`, and playwright-core's `NOTICE` and
   `ThirdPartyNotices.txt` (the notices of its bundled third-party code) are in

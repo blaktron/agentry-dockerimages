@@ -378,7 +378,11 @@ sandbox, output folder, secrets file).
 - `@playwright/mcp` is installed in `/app` with `npm ci --ignore-scripts
   --omit=dev` on the `node:24-bookworm-slim` mirror, held by
   `package-lock.json` (exact versions, sha512 integrity). That mirror also
-  supplies `/usr/local/bin/node`.
+  supplies `/usr/local/bin/node`. The server depends on an exact prerelease of
+  Playwright, made for an older Chromium than Debian's security archive now
+  carries, so `package.json`'s `overrides` hold `playwright` and
+  `playwright-core` to the stable release `PLAYWRIGHT_VERSION` names, made for
+  the installed Chromium.
 - Chromium is Debian's build from the Chromium project's open-source code, with
   no Widevine CDM and no other proprietary component. `install.sh` installs it
   from [snapshot.debian.org](https://snapshot.debian.org/) at the timestamp in
@@ -410,7 +414,10 @@ run's `reports/browser/`, with no setuid or setgid file (Debian's setuid
 
 To bump: set the new version in `package.json` and run `npm install
 --package-lock-only --ignore-scripts` in `build/agentry-browser/`; copy
-`MCP_VERSION` and `PLAYWRIGHT_VERSION` into `source.env`. Then pick a
+`MCP_VERSION` and `PLAYWRIGHT_VERSION` into `source.env`. While `overrides`
+holds Playwright, move its two versions to the newest stable Playwright whose
+`browsers.json` names the Chromium major version in the archive, or drop the
+override once the server's own Playwright is made for it. Then pick a
 snapshot.debian.org timestamp whose `trixie-security` (or `trixie`) holds a
 `chromium` for the major version the new `browsers.json` names, or the one
 before it, and set `DEBIAN_SNAPSHOT`, `CHROMIUM_VERSION`,
