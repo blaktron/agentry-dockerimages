@@ -613,7 +613,7 @@ then run `--ms365-image` on a local build, and dispatch the workflow from
 | Path | What |
 |---|---|
 | `/typst` | the static binary; also the entrypoint, so the checks can run the image |
-| `/fonts/` | the Noto set (Latin, Greek, Cyrillic, Arabic, Hebrew, Thai, the Indic scripts, Simplified Chinese, Korean, symbols, math, Noto Color Emoji) and the report designs' fourteen families. All OFL-1.1 |
+| `/fonts/` | the Noto set (Latin, Greek, Cyrillic, Arabic, Hebrew, Thai, the Indic scripts, Simplified Chinese, Korean, symbols, math, Noto Color Emoji) and the report designs' twenty-two families. All OFL-1.1 |
 | `/typst-packages/` | the `cmarker` package (MIT), as Typst's local package directory, for `--package-path` |
 | `/licenses/` | Typst's `LICENSE` and `NOTICE`, our patch, the licence files of every crate linked into the binary (`crates/`, with `crates.tsv` and `no-licence-file.tsv`), the OFL text of each font source, and `fetch.tsv` |
 
@@ -644,13 +644,17 @@ fails the build, and the licence column names each file's licence. The sources
 are `notofonts/notofonts.github.io`, `notofonts/noto-cjk`,
 `googlefonts/noto-emoji`, `google/fonts` and `typst/packages` (cmarker, whose
 `raw-typst` default is `true`; the runner's template passes `raw-typst: false`
-so Markdown never injects Typst code). The fourteen report design families are
+so Markdown never injects Typst code). The twenty-two report design families are
 Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat, Source Serif 4,
 Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair Display, IBM Plex
-Mono, JetBrains Mono and Source Code Pro, all OFL-1.1 from one pinned
-`google/fonts` commit. Twelve ship there as variable fonts, which `fetch.tsv`
-saves as `*-Variable.ttf`. `fixtures/fonts.txt` lists the families after
-Noto's; the check renders `fixtures/families.typ` with each and fails on an
+Mono, JetBrains Mono, Source Code Pro, DM Sans, Nunito Sans, Raleway, Space
+Grotesk, Libre Baskerville, Crimson Pro, Fraunces and Fira Code, all OFL-1.1
+from `google/fonts`, each file at one of two pinned commits. Twenty of them
+ship there as variable fonts, which `fetch.tsv` saves as `*-Variable.ttf`. DM Sans and Nunito Sans
+carry their default optical size in the family name Typst reads, so Typst
+lists them as `DM Sans 9pt` and `Nunito Sans 12pt` and a template asks for
+those names; Space Grotesk and Fira Code have no italic face, so their italic
+is upright. `fixtures/fonts.txt` lists the families after Noto's; the check renders `fixtures/families.typ` with each and fails on an
 "unknown font family" warning.
 
 PDF reports are described at

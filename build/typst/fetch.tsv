@@ -12,15 +12,18 @@
 #     Simplified Chinese (SC) and Korean (KR);
 #   - googlefonts/noto-emoji @ 8998f5dd (tag v2.051, 2025-09-15), the COLRv1
 #     colour emoji.
-# fonts/ also holds the report designs' fourteen families, all OFL-1.1, from
-# google/fonts @ 62e55e58 (2026-10-09), Google Fonts' published build of each
-# family, whose names the site's editor also uses for its web fonts: Inter,
-# IBM Plex Sans, Source Sans 3, Work Sans, Montserrat; Source Serif 4, Lora,
-# Merriweather, IBM Plex Serif, EB Garamond, Playfair Display; IBM Plex Mono,
-# JetBrains Mono, Source Code Pro. Most ship there only as a variable roman
-# and a variable italic (saved as *-Variable.ttf), which carry every weight
-# and which Typst instances; IBM Plex Serif and IBM Plex Mono ship static, and
-# take Regular, Italic, Bold and Bold Italic.
+# fonts/ also holds the report designs' twenty-two families, all OFL-1.1, from
+# google/fonts, Google Fonts' published build of each family, whose names the
+# site's editor also uses for its web fonts. Fourteen are pinned at 62e55e58
+# (2026-10-09): Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat;
+# Source Serif 4, Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair
+# Display; IBM Plex Mono, JetBrains Mono, Source Code Pro. Eight are pinned at
+# bbda7253 (2026-11-04): DM Sans, Nunito Sans, Raleway, Space Grotesk; Libre
+# Baskerville, Crimson Pro, Fraunces; Fira Code. All but IBM Plex Serif and IBM
+# Plex Mono ship there only as a variable roman and a variable italic (Space
+# Grotesk and Fira Code, a roman only), saved as *-Variable.ttf, which carry
+# every weight and which Typst instances; IBM Plex Serif and IBM Plex Mono ship
+# static, and take Regular, Italic, Bold and Bold Italic.
 # licenses/fonts/: the OFL text of each source repository at a pinned commit.
 # typst-packages/: the cmarker Typst package 0.1.10 (MIT), from typst/packages
 #   @ 4c140e78 (2026-07-03), laid out as Typst's local package directory
@@ -102,6 +105,20 @@ fonts/JetBrainsMono-Italic-Variable.ttf	https://raw.githubusercontent.com/google
 fonts/JetBrainsMono-Variable.ttf	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf	48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda	OFL-1.1
 fonts/SourceCodePro-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/sourcecodepro/SourceCodePro-Italic%5Bwght%5D.ttf	6db77d25aa7b30eff449305b5c998e475694c74d398421127ea5a60f536413cd	OFL-1.1
 fonts/SourceCodePro-Variable.ttf	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/sourcecodepro/SourceCodePro%5Bwght%5D.ttf	b400fc584e10aff25d0e775ce181b4fc1c5ea1b5dc37b81aeb2084375b945790	OFL-1.1
+fonts/DMSans-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/dmsans/DMSans%5Bopsz,wght%5D.ttf	8cd08d97e89c24d0aa92edd2f0f4c8ee6195eee9b7c9f154865a58b02f0c1c0d	OFL-1.1
+fonts/DMSans-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/dmsans/DMSans-Italic%5Bopsz,wght%5D.ttf	22259c0cc8237221b80f44c76ba8d36e6bce3cda72779f5b2773643d499720ae	OFL-1.1
+fonts/NunitoSans-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/nunitosans/NunitoSans%5BYTLC,opsz,wdth,wght%5D.ttf	f934d7142fb4784bf828da485b7dcbd90c0c80d514e9d49a5da0ed3a1ae2491d	OFL-1.1
+fonts/NunitoSans-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/nunitosans/NunitoSans-Italic%5BYTLC,opsz,wdth,wght%5D.ttf	d9d5db18f3c11221a4fbb553cbc709391c1179964c7eaa4466ef43c78aa4492f	OFL-1.1
+fonts/Raleway-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/raleway/Raleway%5Bwght%5D.ttf	8bbcc3eb8275c388f4bcd998832f8a4b943eadbaf6a595205312774b5951aefb	OFL-1.1
+fonts/Raleway-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/raleway/Raleway-Italic%5Bwght%5D.ttf	96629caf2202183fab46c70237055a7d67e6a5400b85413d45a77ed6f2a0770c	OFL-1.1
+fonts/SpaceGrotesk-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf	acad6de1fc93436f5c0f1f4137751ef04f1aea3063e7036535970ffcfbd79f72	OFL-1.1
+fonts/LibreBaskerville-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/librebaskerville/LibreBaskerville%5Bwght%5D.ttf	05a95421961341c5b2556285e8415df9db27dab4f4abe22b446b3c6a8b916c5d	OFL-1.1
+fonts/LibreBaskerville-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/librebaskerville/LibreBaskerville-Italic%5Bwght%5D.ttf	223959683dc73ec4437bd61fabaa4b3f22209e22855ffd3aee36ba61a5116e97	OFL-1.1
+fonts/CrimsonPro-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/crimsonpro/CrimsonPro%5Bwght%5D.ttf	16aa9fb7300a93637da51fac03a071b2ff08b6bbf65f99c794c25f040b58af6a	OFL-1.1
+fonts/CrimsonPro-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/crimsonpro/CrimsonPro-Italic%5Bwght%5D.ttf	a74dc11dcf2fbb1452064e42395a40a907ca630b49cff86012223785e52b2559	OFL-1.1
+fonts/Fraunces-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/fraunces/Fraunces%5BSOFT,WONK,opsz,wght%5D.ttf	177ff6c0f14e5550a3c624247cd1189611d4eb65d000b14944c63d967958abbb	OFL-1.1
+fonts/Fraunces-Italic-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/fraunces/Fraunces-Italic%5BSOFT,WONK,opsz,wght%5D.ttf	b24448c43702fac4ee856781d461a0dfba8d8e594b6e8e190234b75fed2c0e01	OFL-1.1
+fonts/FiraCode-Variable.ttf	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/firacode/FiraCode%5Bwght%5D.ttf	9335b082b3c7850d98a64b584f3417f65355f3471278bb5eeb8c6c0e8657aeeb	OFL-1.1
 licenses/fonts/notofonts-latin-greek-cyrillic.OFL.txt	https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/023d7b73d5c1a5ed6489bd04a120244c1f2bff3f/OFL.txt	cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a	OFL-1.1
 licenses/fonts/notofonts-arabic.OFL.txt	https://raw.githubusercontent.com/notofonts/arabic/834a11352b9ee26f827c745757dc380ef8df68bf/OFL.txt	a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af	OFL-1.1
 licenses/fonts/notofonts-hebrew.OFL.txt	https://raw.githubusercontent.com/notofonts/hebrew/a9e04ff21deca0b7814ab041886b90b296e7034f/OFL.txt	e08036dbb38d9e7a033a721e0ca60befde2ed9d1a8075922dbd3429093dd793b	OFL-1.1
@@ -134,6 +151,14 @@ licenses/fonts/google-fonts-playfairdisplay.OFL.txt	https://raw.githubuserconten
 licenses/fonts/google-fonts-ibmplexmono.OFL.txt	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/ibmplexmono/OFL.txt	7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da	OFL-1.1
 licenses/fonts/google-fonts-jetbrainsmono.OFL.txt	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/jetbrainsmono/OFL.txt	b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d	OFL-1.1
 licenses/fonts/google-fonts-sourcecodepro.OFL.txt	https://raw.githubusercontent.com/google/fonts/62e55e586fc0c29d428ee47b7c359cd33143f93d/ofl/sourcecodepro/OFL.txt	cb30d3086a8b3ce0b9e3690bf48d6620402b61160bc658076f95180ccd9e9dae	OFL-1.1
+licenses/fonts/google-fonts-dmsans.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/dmsans/OFL.txt	9af36190332437f5ecd09974de43c1f7c77a310a996cdd8ceb25628b458840e1	OFL-1.1
+licenses/fonts/google-fonts-nunitosans.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/nunitosans/OFL.txt	efbb0c9e864cef973982d9a17567e6be5c3d1759695574586f3f18c7ecca064b	OFL-1.1
+licenses/fonts/google-fonts-raleway.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/raleway/OFL.txt	7e946cf1171784d1015279e7dc35f827957a6b5d1f1f659ae0c98e5f5e37ed9b	OFL-1.1
+licenses/fonts/google-fonts-spacegrotesk.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/spacegrotesk/OFL.txt	564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72	OFL-1.1
+licenses/fonts/google-fonts-librebaskerville.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/librebaskerville/OFL.txt	3624eddd4c8f8a908130a417ae7cd089c9da69899c4e0ca1a5217d0a6fae16fd	OFL-1.1
+licenses/fonts/google-fonts-crimsonpro.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/crimsonpro/OFL.txt	1820869bd5baa1c2d88fa87c89eea532cf9442d841008acab720654b7f82823d	OFL-1.1
+licenses/fonts/google-fonts-fraunces.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/fraunces/OFL.txt	bdf4c22802eaf804f998195871c6b8938aac2ac14b2d78a8bd66a6f1eced833b	OFL-1.1
+licenses/fonts/google-fonts-firacode.OFL.txt	https://raw.githubusercontent.com/google/fonts/bbda7253fc363238b05d97515ca71f8ae49c4fa9/ofl/firacode/OFL.txt	926041dac670e6922505e35ac1661a4e8d20f1ffeabbbcb5edb5544370702369	OFL-1.1
 typst-packages/preview/cmarker/0.1.10/typst.toml	https://raw.githubusercontent.com/typst/packages/4c140e781422cf4e9eb60c0f4f4aec49026a546f/packages/preview/cmarker/0.1.10/typst.toml	e9f62322ea2c6b56a18c951f61410dcb0b370acd33023f43bf3af727c34d8459	MIT
 typst-packages/preview/cmarker/0.1.10/lib.typ	https://raw.githubusercontent.com/typst/packages/4c140e781422cf4e9eb60c0f4f4aec49026a546f/packages/preview/cmarker/0.1.10/lib.typ	400e08c8aca995b98a94374aa231fd3ed5c7cebcc75ebb7a0c48bb572a401d7e	MIT
 typst-packages/preview/cmarker/0.1.10/plugin.wasm	https://raw.githubusercontent.com/typst/packages/4c140e781422cf4e9eb60c0f4f4aec49026a546f/packages/preview/cmarker/0.1.10/plugin.wasm	cabb697c9c9b9bed14c5f5cfb5c21f353318daca82799bde0567bdaecee20f94	MIT

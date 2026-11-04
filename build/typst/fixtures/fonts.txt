@@ -1,7 +1,10 @@
 # The font families scripts/check.sh --typst-image expects `typst fonts` to
 # list from /fonts, one a line: every family fetch.tsv brings. Every family
 # whose name does not start with "Noto" is a report design's family,
-# and the check also renders families.typ in each one.
+# and the check also renders families.typ in each one. DM Sans and Nunito Sans
+# are listed as Typst lists them, "DM Sans 9pt" and "Nunito Sans 12pt": their
+# variable files carry the default optical size in the family name Typst reads
+# (name ID 1), so a template asks Typst for those two names.
 Noto Sans
 Noto Serif
 Noto Sans Mono
@@ -38,3 +41,11 @@ Playfair Display
 IBM Plex Mono
 JetBrains Mono
 Source Code Pro
+DM Sans 9pt
+Nunito Sans 12pt
+Raleway
+Space Grotesk
+Libre Baskerville
+Crimson Pro
+Fraunces
+Fira Code
