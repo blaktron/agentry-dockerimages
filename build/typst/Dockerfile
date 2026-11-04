@@ -35,7 +35,7 @@
 #
 #   /typst            the static binary (it is also the entrypoint, so the
 #                     image can be run for the checks)
-#   /fonts/           the Noto set and the report designs' fourteen families
+#   /fonts/           the Noto set and the report designs' twenty-two families
 #                     (fetch.tsv)
 #   /typst-packages/  the cmarker package, for --package-path
 #   /licenses/        Typst's LICENSE and NOTICE, the patch, the licence files

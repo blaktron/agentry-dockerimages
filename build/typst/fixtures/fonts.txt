@@ -38,3 +38,11 @@ Playfair Display
 IBM Plex Mono
 JetBrains Mono
 Source Code Pro
+DM Sans
+Nunito Sans
+Raleway
+Space Grotesk
+Libre Baskerville
+Crimson Pro
+Fraunces
+Fira Code

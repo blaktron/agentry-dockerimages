@@ -132,9 +132,11 @@ name identifies the upstream component.
 - the report designs' fonts, from `google/fonts` (Google Fonts' published
   builds): Inter, IBM Plex Sans, Source Sans 3, Work Sans, Montserrat, Source
   Serif 4, Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair Display,
-  IBM Plex Mono, JetBrains Mono and Source Code Pro. Each is under the SIL Open
-  Font License 1.1, with its copyright holders and any Reserved Font Name
-  ("Source", "Plex", "Lora", "Merriweather", "Playfair Display") in the
+  IBM Plex Mono, JetBrains Mono, Source Code Pro, DM Sans, Nunito Sans,
+  Raleway, Space Grotesk, Libre Baskerville, Crimson Pro, Fraunces and Fira
+  Code. Each is under the SIL Open Font License 1.1, with its copyright
+  holders and any Reserved Font Name ("Source", "Plex", "Lora", "Merriweather",
+  "Playfair Display", "Raleway", "Libre Baskerville") in the
   `OFL.txt` shipped under `/licenses/fonts/google-fonts-<family>.OFL.txt`.
   They are redistributed unmodified (only the files are renamed, to
   `*-Variable.ttf` where Google Fonts ships a variable font) and are not sold
