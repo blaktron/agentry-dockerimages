@@ -806,7 +806,10 @@ for m in re.finditer(rb"stream\r?\n", data):
 blob = b"\n".join(text)
 embedded = {n.decode("latin-1") for n in re.findall(rb"/BaseFont\s*/(?:[A-Z]{6}\+)?([^\s/<>\[\]()]+)", blob)}
 want = [f for f in sys.argv[2].split("|") if f] + ["Noto Sans SC", "Noto Sans Arabic", "Noto Sans Devanagari"]
-missing = [f for f in want if not any(e.startswith(f.replace(" ", "")) for e in embedded)]
+# A variable font whose family name carries its default optical size ("DM Sans
+# 9pt") is embedded under its PostScript name ("DMSans-9ptRegular"), so match
+# the family without that suffix.
+missing = [f for f in want if not any(e.startswith(re.sub(r" \d+pt$", "", f).replace(" ", "")) for e in embedded)]
 untagged = [k.decode() for k in (b"/StructTreeRoot", b"/MarkInfo", b"pdfuaid:part") if k not in blob]
 if missing or untagged:
     if missing:

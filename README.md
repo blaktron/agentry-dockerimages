@@ -650,8 +650,11 @@ Lora, Merriweather, IBM Plex Serif, EB Garamond, Playfair Display, IBM Plex
 Mono, JetBrains Mono, Source Code Pro, DM Sans, Nunito Sans, Raleway, Space
 Grotesk, Libre Baskerville, Crimson Pro, Fraunces and Fira Code, all OFL-1.1
 from `google/fonts`, each file at one of two pinned commits. Twenty of them
-ship there as variable fonts, which `fetch.tsv` saves as `*-Variable.ttf`. `fixtures/fonts.txt` lists the families after
-Noto's; the check renders `fixtures/families.typ` with each and fails on an
+ship there as variable fonts, which `fetch.tsv` saves as `*-Variable.ttf`. DM Sans and Nunito Sans
+carry their default optical size in the family name Typst reads, so Typst
+lists them as `DM Sans 9pt` and `Nunito Sans 12pt` and a template asks for
+those names; Space Grotesk and Fira Code have no italic face, so their italic
+is upright. `fixtures/fonts.txt` lists the families after Noto's; the check renders `fixtures/families.typ` with each and fails on an
 "unknown font family" warning.
 
 PDF reports are described at
