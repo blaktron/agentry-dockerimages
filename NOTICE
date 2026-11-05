@@ -14,7 +14,7 @@ terms are restated here.
 ### Docker Agent
 
     Upstream:   https://github.com/docker/docker-agent
-    Commit:     b8fce99da4f6ee28af41a2d1e181296c8f17765e  (tag v1.154.0)
+    Commit:     c83962d5e3a056e59def1d0cc4d62e6a437cfe63  (tag v1.157.2)
     Licence:    Apache-2.0
     Our image:  agentry-docker-agent-src
     Context:    build/docker-agent/
@@ -37,9 +37,8 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    the darwin/windows paths) are dropped; this builds Linux only. The binary is
    still CGO with external linking and still asserted static.
 5. otel's `otlptracegrpc` exporter is raised before the build from v1.40.0 to
-   v1.47.0 and `golang.org/x/net` from v0.61.0 to v0.62.0, the releases that
-   fix advisories reported against upstream's pins. `go.mod` and `go.sum` in
-   the build are changed by `go get`.
+   v1.47.0, the release that fixes an advisory reported against upstream's
+   pin. `go.mod` and `go.sum` in the build are changed by `go get`.
 6. `build/docker-agent/cold-cache-clear.patch` is applied before the build. It
    adds the agent setting `cold_cache_clear`, which replaces old tool results
    in the history sent to the model with a placeholder after the provider's
@@ -50,6 +49,19 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    where it changes them, and adds five files of its own under `pkg/session`,
    `pkg/runtime` and `pkg/config/latest`, each headed as not part of upstream.
    The image keeps the patch at `/usr/share/doc/docker-agent/`.
+7. `build/docker-agent/long-runs.patch` is applied after it. It makes LM
+   Studio's refusal of an over-long prompt a context overflow, compacts after
+   an overflow on a model whose window is unknown against a window estimated
+   from the refusal, reads `provider_opts.stream_idle_timeout`, and adds the
+   agent setting `compaction_notes`, which ends a compaction summary by
+   pointing the agent at its notes file. It changes `pkg/agent/agent.go`,
+   `pkg/agent/opts.go`, `pkg/config/latest/types.go`,
+   `pkg/modelerrors/modelerrors.go`, `pkg/runtime/loop_steps.go`,
+   `pkg/runtime/session_compaction.go`, `pkg/runtime/streaming.go` and
+   `pkg/teamloader/teamloader.go`, each marked where it changes them, and adds
+   nine files of its own under `pkg/modelerrors`, `pkg/runtime` and
+   `pkg/config/latest`, each headed as not part of upstream. The image keeps
+   it beside the first.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
@@ -172,7 +184,7 @@ naming them — see each upstream repository.
 | Our image | Upstream | Licence |
 |---|---|---|
 | `agentry-mcp-gateway` | `docker/mcp-gateway:v0.44.3` | see upstream |
-| `agentry-docker-agent` | `docker/docker-agent:1.154.0` | Apache-2.0 |
+| `agentry-docker-agent` | `docker/docker-agent:1.157.2` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
 | `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | see upstream (Go: BSD-3; Alpine: MIT) |
