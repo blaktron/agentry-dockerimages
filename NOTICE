@@ -52,7 +52,7 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
 7. `build/docker-agent/long-runs.patch` is applied after it. It makes LM
    Studio's refusal of an over-long prompt a context overflow, compacts after
    an overflow on a model whose window is unknown against a window estimated
-   from the refusal, reads `provider_opts.stream_idle_timeout`, and adds the
+   from the refusal (halved if the summary overflows it), reads `provider_opts.stream_idle_timeout`, and adds the
    agent setting `compaction_notes`, which ends a compaction summary by
    pointing the agent at its notes file. It changes `pkg/agent/agent.go`,
    `pkg/agent/opts.go`, `pkg/config/latest/types.go`,

@@ -49,7 +49,8 @@
 #        already are;
 #      - an overflow on a model whose window is unknown compacts against a
 #        window estimated from the refusal (the window it states, or half the
-#        refused request's estimated size) instead of emitting the error that
+#        refused request's estimated size, halved again up to three times if
+#        the summary call overflows it too) instead of emitting the error that
 #        ends a `run --exec`;
 #      - provider_opts.stream_idle_timeout (a duration, or seconds) replaces
 #        the 5-minute stream idle limit for that model;
@@ -57,8 +58,8 @@
 #        summary with one sentence pointing the agent at that notes file.
 #      Its tests run in the build.
 #
-# The patch's files carry a note that Agentry's build adds or changes them, and
-# the image keeps the patch at /usr/share/doc/docker-agent/.
+# The patches' files carry a note that Agentry's build adds or changes them, and
+# the image keeps both patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -100,10 +101,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	go test -tags no_audio -count=1 -run 'ColdC|LastResponseAt' \
 	./pkg/session ./pkg/runtime ./pkg/config/latest
 # long-runs.patch's tests: LM Studio's refusal is an overflow, a stated window
-# is read, an overflow with no known window compacts with no error event and a
-# manual compaction still needs one, the idle limit is read from
-# provider_opts, and the notes reminder is added only when a notes file is
-# named.
+# is read, an overflow with no known window compacts with no error event, an
+# estimate the summary overflows is halved, a manual compaction still needs a
+# window, the idle limit is read from provider_opts, and the notes reminder is
+# added once, only when a single-line notes file is named.
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LongRun' \

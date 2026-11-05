@@ -512,7 +512,7 @@ with the arguments cut at 200 bytes. The stored session keeps every original
 and records which results are cleared, so later requests, a reload of the
 session and docker-agent's own compaction send the same bytes. Nothing is
 cleared inside a turn, and an agent without the setting behaves as upstream.
-The image keeps the patch at `/usr/share/doc/docker-agent/`. The patch leaves
+The image keeps it at `/usr/share/doc/docker-agent/`. It leaves
 upstream's `agent-schema.json` alone: it is outside the build's context and
 the binary does not read it, so an editor validating an agent file against it
 does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
@@ -531,8 +531,10 @@ does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
   "Failed to get model definition" error, which ends a `run --exec`. The patch
   compacts against an estimated window instead: the one the refusal states
   ("maximum context length is N tokens", "available context size (N tokens)",
-  `n_ctx`), or else half the refused request's estimated size. A manual
-  `/compact` with no known window fails as before.
+  `n_ctx`), or else half the refused request's estimated size. If the summary
+  call overflows that estimate too, the window is halved and the summary tried
+  again, up to three times and never below 1024 tokens. A manual `/compact`
+  with no known window fails as before.
 - **`provider_opts.stream_idle_timeout`.** A duration (`30m`) or a number of
   seconds replaces the 5-minute limit on a model's silent stream. A server of
   the person's own can take longer than that to send its first byte while it
@@ -540,8 +542,13 @@ does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
 - **`compaction_notes: <path>`.** An agent setting naming a notes file the
   agent keeps. Every compaction summary then ends with one sentence telling the
   agent to read that file before anything else and go on from where it says.
-  The sentence is part of the stored summary, so a reload sends the same bytes.
-  Without the setting a summary is unchanged.
+  The sentence is part of the stored summary, so a reload sends the same bytes,
+  and a copy the summariser carries over from an earlier summary is dropped, so
+  it appears once. A path of more than one line is ignored. Without the
+  setting, and for a provider's own (native) compaction, a summary is
+  unchanged.
+
+The image keeps `long-runs.patch` beside the first patch.
 
 It leaves `agent-schema.json` alone for the same reason as the first patch, so
 `TestSchemaMatchesGoTypes` also names `compaction_notes`.
