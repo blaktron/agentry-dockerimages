@@ -55,7 +55,7 @@ list. Built images are listed with what they are built from.
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear patch, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear and long-runs patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -496,9 +496,9 @@ base comes from the digest-pinned mirrors; the `docker-mcp` plugin is copied
 from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
-linked; otel's `otlptracegrpc` exporter and `golang.org/x/net` are raised to the
-releases that fix the advisories reported against upstream's pins; and it
-carries `cold-cache-clear.patch`.
+linked; otel's `otlptracegrpc` exporter is raised to the release that fixes the
+advisory reported against upstream's pin; and it carries two patches,
+`cold-cache-clear.patch` and then `long-runs.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that
@@ -512,23 +512,65 @@ with the arguments cut at 200 bytes. The stored session keeps every original
 and records which results are cleared, so later requests, a reload of the
 session and docker-agent's own compaction send the same bytes. Nothing is
 cleared inside a turn, and an agent without the setting behaves as upstream.
-The image keeps the patch at `/usr/share/doc/docker-agent/`. The patch leaves
+The image keeps it at `/usr/share/doc/docker-agent/`. It leaves
 upstream's `agent-schema.json` alone: it is outside the build's context and
 the binary does not read it, so an editor validating an agent file against it
 does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
 `pkg/config` fails on the patched tree for that reason alone.
 
-**Re-porting the patch on a commit bump.** Apply it to the new commit
-(`git apply --3way build/docker-agent/cold-cache-clear.patch` in a clone at
-`UPSTREAM_COMMIT`), resolve what no longer matches, and run its tests there:
+`long-runs.patch` keeps a long run on a model server of the person's own
+(llama.cpp, LM Studio, vLLM, Ollama) going:
+
+- **LM Studio's refusal is an overflow.** LM Studio refuses an over-long prompt
+  with "The number of tokens to keep from the initial prompt is greater than
+  the context length", sent as an error event on a 200 response. The patch adds
+  it to the context-overflow matcher, which already knows llama.cpp's and
+  vLLM's wording, so docker-agent compacts and retries instead of failing.
+- **An overflow with an unknown window compacts.** Upstream compacts after an
+  overflow only when it knows the model's window, and otherwise emits the
+  "Failed to get model definition" error, which ends a `run --exec`. The patch
+  compacts against an estimated window instead: the one the refusal states
+  ("maximum context length is N tokens", "available context size (N tokens)",
+  `n_ctx`), or else half the refused request's estimated size. If the summary
+  call overflows that estimate too, the window is halved and the summary tried
+  again, up to three times and never below 1024 tokens. A manual `/compact`
+  with no known window fails as before.
+- **`provider_opts.stream_idle_timeout`.** A duration (`30m`) or a number of
+  seconds replaces the 5-minute limit on a model's silent stream. A server of
+  the person's own can take longer than that to send its first byte while it
+  reads a long prompt it has not cached.
+- **`compaction_notes: <path>`.** An agent setting naming a notes file the
+  agent keeps. Every compaction summary then ends with one sentence telling the
+  agent to read that file before anything else and go on from where it says.
+  The sentence is part of the stored summary, so a reload sends the same bytes,
+  and a copy the summariser carries over from an earlier summary is dropped, so
+  it appears once. A path of more than one line is ignored. Without the
+  setting, and for a provider's own (native) compaction, a summary is
+  unchanged.
+
+The image keeps `long-runs.patch` beside the first patch.
+
+It leaves `agent-schema.json` alone for the same reason as the first patch, so
+`TestSchemaMatchesGoTypes` also names `compaction_notes`.
+
+**Re-porting the patches on a commit bump.** Apply them in order to the new
+commit (`git apply --3way build/docker-agent/cold-cache-clear.patch`, commit,
+then `git apply --3way build/docker-agent/long-runs.patch`, in a clone at
+`UPSTREAM_COMMIT`), resolve what no longer matches, and run their tests there:
 `go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
-./pkg/runtime ./pkg/config/latest`. The hooks it needs are the session's two
-history assemblies (`getMessages` and `CompactionInput`), the run loop's first
-model request (`runStreamLoop`, before its loop), the agent config's latest
-schema and the teamloader's agent options. Write the result back with `git
-diff > cold-cache-clear.patch`. The build applies it with `patch --fuzz=0`, so
-a hunk that moved fails the build rather than landing nearby, and runs its
-tests before the binary is built; `scripts/check.sh` fails if the patch, its
+./pkg/runtime ./pkg/config/latest` and `go test -tags no_audio -run 'LongRun'
+./pkg/modelerrors ./pkg/runtime ./pkg/config/latest`. The first patch's hooks
+are the session's two history assemblies (`getMessages` and
+`CompactionInput`), the run loop's first model request (`runStreamLoop`,
+before its loop), the agent config's latest schema and the teamloader's agent
+options. The second's are the overflow matcher's token patterns, the overflow
+branch of `handleStreamError`, `generateCompaction`'s context limit,
+`applyCompactionResult`, `streamIdleTimeoutFor` and the same config and
+teamloader points. Write each back with `git diff` against the tree before it
+(`cold-cache-clear.patch` against upstream, `long-runs.patch` against the
+first patch's commit). The build applies both with `patch --fuzz=0`, so a hunk
+that moved fails the build rather than landing nearby, and runs their tests
+before the binary is built; `scripts/check.sh` fails if either patch, its
 application or its tests leave the Dockerfile.
 
 The `docker-agent` workflow builds it natively for amd64 and arm64, runs each

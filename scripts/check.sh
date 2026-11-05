@@ -76,9 +76,9 @@
 #     level error with the audit log off, strip setuid and setgid bits and
 #     run as ms365; or the keeper, the generator's lockfile, the allow-lists
 #     or the MCP probe is missing (build/ms365).
-#   - the docker-agent build's patch is missing, empty, not applied with no
-#     fuzz by its Dockerfile, its tests not run there, or the patch not named
-#     in source.env (build/docker-agent).
+#   - either of the docker-agent build's patches is missing, empty, not
+#     applied with no fuzz by its Dockerfile, its tests not run there, or not
+#     named in source.env (build/docker-agent).
 #
 # It pulls nothing and reads no credential, except in --unsafe-image,
 # --files-image, --typst-image, --codex-image, --hostlink-image,
@@ -145,8 +145,9 @@
 #       read-only root, the image's own user), and fail unless the user is not
 #       root, `docker-agent version` names source.env's tag and commit,
 #       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
-#       the binary is static, it carries the cold-cache clear and the image
-#       keeps the patch, and it links golang.org/x/net v0.62.0 or later.
+#       the binary is static, it carries the cold-cache clear and the
+#       long-runs changes and the image keeps both patches, and it links
+#       golang.org/x/net v0.62.0 or later.
 #       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
 #       run a built agentry-hostlink hardened, as the runner runs a host link
@@ -1267,9 +1268,9 @@ codexImage() {
 
 DOCKER_AGENT_CTX=build/docker-agent
 
-# checkDockerAgent holds the docker-agent build to its patch: present, applied
-# with no fuzz before the build, its tests run in the build, and named in
-# source.env, so a commit bump cannot drop it unseen.
+# checkDockerAgent holds the docker-agent build to its patches: each present,
+# applied with no fuzz before the build, its tests run in the build, and named
+# in source.env, so a commit bump cannot drop one unseen.
 checkDockerAgent() {
 	local bad=0
 	if [ ! -s "$DOCKER_AGENT_CTX/cold-cache-clear.patch" ]; then
@@ -1285,6 +1286,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name cold-cache-clear.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/long-runs.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/long-runs.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*long-runs\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply long-runs.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'LongRun'" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run long-runs.patch's tests"
+		bad=1
+	elif ! grep -q 'long-runs\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name long-runs.patch"
+		bad=1
+	fi
 	return "$bad"
 }
 
@@ -1293,9 +1307,9 @@ checkDockerAgent() {
 # user) and fails unless the user is not root, `docker-agent version` names
 # source.env's tag and commit, DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file
 # is setuid or setgid, the binary is static, it carries the cold-cache clear
-# (its config key) and the image keeps the patch, and the binary links
-# golang.org/x/net v0.62.0 or later. PLATFORM asks for, and checks, one
-# architecture.
+# and the long-runs changes (their config keys), the image keeps both patches,
+# and the binary links golang.org/x/net v0.62.0 or later. PLATFORM asks for,
+# and checks, one architecture.
 dockerAgentImage() {
 	local ref="$1" runtime="${CONTAINER:-docker}" out got want arch id bad=0
 	# shellcheck source=/dev/null
@@ -1369,12 +1383,21 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the cold-cache clear (cold-cache-clear.patch)"
 		bad=1
 	fi
-	if "${run[@]}" --entrypoint /bin/sh "$ref" -c 'test -s /usr/share/doc/docker-agent/cold-cache-clear.patch'; then
-		echo "ok   the image keeps the patch at /usr/share/doc/docker-agent/"
+	if grep -aq 'compaction_notes' "$out/docker-agent" && grep -aq 'stream_idle_timeout' "$out/docker-agent"; then
+		echo "ok   the binary carries the long-runs changes"
 	else
-		echo "FAIL /usr/share/doc/docker-agent/cold-cache-clear.patch is missing"
+		echo "FAIL the binary does not carry the long-runs changes (long-runs.patch)"
 		bad=1
 	fi
+	local patch
+	for patch in cold-cache-clear.patch long-runs.patch; do
+		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
+			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
+		else
+			echo "FAIL /usr/share/doc/docker-agent/$patch is missing"
+			bad=1
+		fi
+	done
 	local xnet
 	xnet=$(awk '$1 == "dep" && $2 == "golang.org/x/net" {print $3}' "$out/mods")
 	if [ -n "$xnet" ] && [ "$(printf '%s\nv0.62.0\n' "$xnet" | sort -V | head -1)" = v0.62.0 ]; then
