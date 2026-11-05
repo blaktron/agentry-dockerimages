@@ -25,13 +25,11 @@
 #      crazymax/osxcross, zig, the darwin and windows paths) are dropped. The
 #      binary is still CGO with external linking, checked to be static, and
 #      built with -tags no_audio and the same version ldflags.
-#   5. Two modules are raised before the build, to the releases that fix the
-#      advisories govulncheck reports against upstream's pins: otel's
-#      otlptracegrpc exporter from v1.40.0 to v1.47.0, the version of the rest
-#      of upstream's otel modules, and golang.org/x/net from v0.61.0 to
-#      v0.62.0, which fixes two flaws in its HTML parser and renderer that the
-#      fetch tool reaches. `go get` raises only what those modules require; the
-#      build records the result, and `go version -m /docker-agent` shows it.
+#   5. otel's otlptracegrpc exporter is raised before the build from v1.40.0
+#      to v1.47.0, the version of the rest of upstream's otel modules and the
+#      release that fixes the advisory govulncheck reports against upstream's
+#      pin. `go get` raises only what that module requires; the build records
+#      the result, and `go version -m /docker-agent` shows it.
 #   6. cold-cache-clear.patch, applied with no fuzz before the build, adds the
 #      agent setting `cold_cache_clear: {after, keep_turns, keep_browser,
 #      browser_tools}`. On the first model request of a turn that starts more
@@ -44,9 +42,24 @@
 #      cleared, so later requests, a reload and a compaction send the same
 #      bytes. Nothing is cleared inside a turn, and an agent without the
 #      setting is unchanged. The patch's own tests run in the build.
+#   7. long-runs.patch, applied with no fuzz after it, keeps a long run on a
+#      model server of the person's own going:
+#      - LM Studio's refusal of an over-long prompt ("... is greater than the
+#        context length") is a context overflow, as llama.cpp's and vLLM's
+#        already are;
+#      - an overflow on a model whose window is unknown compacts against a
+#        window estimated from the refusal (the window it states, or half the
+#        refused request's estimated size, halved again up to three times if
+#        the summary call overflows it too) instead of emitting the error that
+#        ends a `run --exec`;
+#      - provider_opts.stream_idle_timeout (a duration, or seconds) replaces
+#        the 5-minute stream idle limit for that model;
+#      - the agent setting `compaction_notes: <path>` ends every compaction
+#        summary with one sentence pointing the agent at that notes file.
+#      Its tests run in the build.
 #
-# The patch's files carry a note that Agentry's build adds or changes them, and
-# the image keeps the patch at /usr/share/doc/docker-agent/.
+# The patches' files carry a note that Agentry's build adds or changes them, and
+# the image keeps both patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -69,13 +82,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
-COPY --from=agentry cold-cache-clear.patch /agentry/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch /agentry/
 # --fuzz=0: a hunk that no longer matches exactly fails the build rather than
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/long-runs.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
-	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 \
-	golang.org/x/net@v0.62.0 && \
+	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 && \
 	go mod verify
 ARG GIT_TAG
 ARG GIT_COMMIT
@@ -87,6 +100,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'ColdC|LastResponseAt' \
 	./pkg/session ./pkg/runtime ./pkg/config/latest
+# long-runs.patch's tests: LM Studio's refusal is an overflow, a stated window
+# is read, an overflow with no known window compacts with no error event, an
+# estimate the summary overflows is halved, a manual compaction still needs a
+# window, the idle limit is read from provider_opts, and the notes reminder is
+# added once, only when a single-line notes file is named.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'LongRun' \
+	./pkg/modelerrors ./pkg/runtime ./pkg/config/latest
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
@@ -111,7 +133,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
-COPY --from=agentry cold-cache-clear.patch /usr/share/doc/docker-agent/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -119,4 +141,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear patch, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear and long-runs patches, for the QuickAgent runtime's default harness"

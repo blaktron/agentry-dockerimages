@@ -1,0 +1,799 @@
+diff --git a/pkg/agent/agent.go b/pkg/agent/agent.go
+index ea13b4b..78c4e41 100644
+--- a/pkg/agent/agent.go
++++ b/pkg/agent/agent.go
+@@ -53,6 +53,7 @@ type Agent struct {
+ 	maxOldToolCallTokens    int
+ 	maxToolResultTokens     int
+ 	coldCacheClear          *ColdCacheClear
++	compactionNotes         string
+ 	numHistoryItems         int
+ 	addPromptFiles          []string
+ 	addPromptFilesDepth     int
+@@ -158,6 +159,12 @@ func (a *Agent) ColdCacheClear() *ColdCacheClear {
+ 	return a.coldCacheClear
+ }
+ 
++// CompactionNotes returns the notes file a compaction summary points the
++// agent back to, or "" when it names none (added by Agentry's build).
++func (a *Agent) CompactionNotes() string {
++	return a.compactionNotes
++}
++
+ func (a *Agent) NumHistoryItems() int {
+ 	return a.numHistoryItems
+ }
+diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
+index 4e1a4f1..8e20793 100644
+--- a/pkg/agent/opts.go
++++ b/pkg/agent/opts.go
+@@ -293,6 +293,14 @@ const (
+ 	DefaultColdClearKeepBrowser = 2
+ )
+ 
++// WithCompactionNotes names the notes file a compaction summary points the
++// agent back to; "" names none (added by Agentry's build).
++func WithCompactionNotes(path string) Opt {
++	return func(a *Agent) {
++		a.compactionNotes = path
++	}
++}
++
+ // WithColdCacheClear sets the agent's cold-cache clear from its config; nil
+ // leaves the agent without one.
+ func WithColdCacheClear(c *latest.ColdCacheClearConfig) Opt {
+diff --git a/pkg/config/latest/compaction_notes_test.go b/pkg/config/latest/compaction_notes_test.go
+new file mode 100644
+index 0000000..e7d2d47
+--- /dev/null
++++ b/pkg/config/latest/compaction_notes_test.go
+@@ -0,0 +1,19 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package latest
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++)
++
++func TestLongRunCompactionNotesParses(t *testing.T) {
++	t.Parallel()
++
++	cfg, err := parse([]byte("version: \"16\"\nagents:\n  root:\n    model: anthropic/claude-sonnet-4-5\n    compaction_notes: /scratch/notes.md\n"))
++	require.NoError(t, err)
++	assert.Equal(t, "/scratch/notes.md", cfg.Agents[0].CompactionNotes)
++}
+diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
+index 3a4d0bb..ede38fa 100644
+--- a/pkg/config/latest/types.go
++++ b/pkg/config/latest/types.go
+@@ -793,6 +793,10 @@ type AgentConfig struct {
+ 	// first model request of a turn that starts after the prompt cache has
+ 	// expired. Absent, nothing is cleared. Added by Agentry's build.
+ 	ColdCacheClear *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`
++	// CompactionNotes names a notes file the agent keeps, which a
++	// compaction summary ends by pointing the agent back to. Absent, the
++	// summary is unchanged. Added by Agentry's build.
++	CompactionNotes string `json:"compaction_notes,omitempty" yaml:"compaction_notes,omitempty"`
+ 	// SessionCompaction toggles automatic session compaction for this agent:
+ 	// the proactive threshold trigger and the post-overflow auto-recovery.
+ 	// Manual /compact stays available regardless. Pointer (tri-state) so
+diff --git a/pkg/modelerrors/modelerrors.go b/pkg/modelerrors/modelerrors.go
+index 2ac13e9..65a6bfa 100644
+--- a/pkg/modelerrors/modelerrors.go
++++ b/pkg/modelerrors/modelerrors.go
+@@ -153,6 +153,7 @@ var tokenOverflowPatterns = []string{
+ 	"context window exceeds limit",       // MiniMax
+ 	"model_context_window_exceeded",      // z.ai
+ 	"exceeds the available context size", // llama.cpp server (Docker Model Runner)
++	"is greater than the context length", // LM Studio ("tokens to keep from the initial prompt ..."; added by Agentry's build)
+ 	"max_tokens must be greater than",    // Anthropic edge case: thinking-budget cascade
+ 	"maximum number of tokens",
+ 	"content length exceeds",
+diff --git a/pkg/modelerrors/overflow_window.go b/pkg/modelerrors/overflow_window.go
+new file mode 100644
+index 0000000..5532ce2
+--- /dev/null
++++ b/pkg/modelerrors/overflow_window.go
+@@ -0,0 +1,46 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package modelerrors
++
++import (
++	"regexp"
++	"strconv"
++	"strings"
++)
++
++// overflowWindowPatterns find the context window a server states when it
++// refuses a request as too long. Each has one group, the window in tokens.
++var overflowWindowPatterns = []*regexp.Regexp{
++	// OpenAI, vLLM: "This model's maximum context length is 32768 tokens."
++	regexp.MustCompile(`(?i)maximum context length is ([0-9][0-9,]*) tokens`),
++	// llama.cpp server: "... exceeds the available context size (2048 tokens)"
++	regexp.MustCompile(`(?i)available context size \(([0-9][0-9,]*) tokens\)`),
++	// llama.cpp's error body ("n_ctx":2048) and its log wording, which LM
++	// Studio passes on ("n_keep: 5746 >= n_ctx: 4096").
++	regexp.MustCompile(`"?n_ctx"?\s*[:=]\s*([0-9]+)`),
++}
++
++// maxStatedWindow bounds what OverflowWindow accepts, so a stray number in
++// an error message cannot pose as a window.
++const maxStatedWindow = 100_000_000
++
++// OverflowWindow returns the context window, in tokens, that a
++// context-overflow error states, or 0 when it states none.
++func OverflowWindow(err error) int64 {
++	if err == nil {
++		return 0
++	}
++	msg := err.Error()
++	for _, re := range overflowWindowPatterns {
++		m := re.FindStringSubmatch(msg)
++		if m == nil {
++			continue
++		}
++		n, perr := strconv.ParseInt(strings.ReplaceAll(m[1], ",", ""), 10, 64)
++		if perr == nil && n > 0 && n <= maxStatedWindow {
++			return n
++		}
++	}
++	return 0
++}
+diff --git a/pkg/modelerrors/overflow_window_test.go b/pkg/modelerrors/overflow_window_test.go
+new file mode 100644
+index 0000000..4ea4817
+--- /dev/null
++++ b/pkg/modelerrors/overflow_window_test.go
+@@ -0,0 +1,50 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package modelerrors
++
++import (
++	"errors"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++func TestLongRunLMStudioRefusalIsAnOverflow(t *testing.T) {
++	t.Parallel()
++
++	// LM Studio sends this as an SSE error event on a 200 response.
++	for _, msg := range []string{
++		`received error while streaming: {"message":"The number of tokens to keep from the initial prompt is greater than the context length."}`,
++		"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5746 >= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input",
++	} {
++		err := errors.New(msg)
++		assert.True(t, IsContextOverflowError(err), msg)
++		assert.Equal(t, OverflowKindTokens, classifyOverflow(err), msg)
++	}
++}
++
++func TestLongRunOverflowStatesTheWindow(t *testing.T) {
++	t.Parallel()
++
++	cases := []struct {
++		name string
++		msg  string
++		want int64
++	}{
++		{"vLLM", "This model's maximum context length is 32768 tokens. However, you requested 40961 tokens (36865 in the messages, 4096 in the completion).", 32768},
++		{"OpenAI with separators", "This model's maximum context length is 128,000 tokens. However, your messages resulted in 130,512 tokens.", 128000},
++		{"llama.cpp message", "request (12009 tokens) exceeds the available context size (2048 tokens), try increasing it", 2048},
++		{"llama.cpp body", `400 Bad Request {"error":{"code":400,"message":"the request exceeds the available context size, try increasing it","type":"exceed_context_size_error","n_prompt_tokens":12009,"n_ctx":4096}}`, 4096},
++		{"LM Studio", "The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5746 >= n_ctx: 4096).", 4096},
++		{"no window stated", "the request exceeds the available context size, try increasing it", 0},
++		{"implausible number", "maximum context length is 999999999999 tokens", 0},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			t.Parallel()
++			assert.Equal(t, tc.want, OverflowWindow(NewContextOverflowError(errors.New(tc.msg))))
++		})
++	}
++	assert.Zero(t, OverflowWindow(nil))
++}
+diff --git a/pkg/runtime/loop_steps.go b/pkg/runtime/loop_steps.go
+index e7d2767..39bdecb 100644
+--- a/pkg/runtime/loop_steps.go
++++ b/pkg/runtime/loop_steps.go
+@@ -194,7 +194,13 @@ func (r *LocalRuntime) handleStreamError(
+ 			"The conversation has exceeded the model's context window. Automatically compacting the conversation history...",
+ 			a.Name(),
+ 		))
+-		if err := r.compactWithReason(ctx, sess, "", compactionReasonOverflow, events); err != nil {
++		// With no known window, compact against one estimated from the
++		// refusal instead of failing the run (added by Agentry's build).
++		compactCtx := ctx
++		if contextLimit <= 0 {
++			compactCtx = withOverflowWindow(ctx, estimateOverflowWindow(err, sess, a))
++		}
++		if err := r.compactWithReason(compactCtx, sess, "", compactionReasonOverflow, events); err != nil {
+ 			events.Emit(ErrorForSession(sess.ID, err.Error()))
+ 			return streamErrorFatal
+ 		}
+diff --git a/pkg/runtime/notes_reminder.go b/pkg/runtime/notes_reminder.go
+new file mode 100644
+index 0000000..d07c44a
+--- /dev/null
++++ b/pkg/runtime/notes_reminder.go
+@@ -0,0 +1,26 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import "strings"
++
++// withNotesReminder ends a compaction summary with one sentence pointing the
++// agent at the notes file it keeps, so that after the summary replaces the
++// conversation it reads where it had got to before going on. The sentence is
++// part of the stored summary, so a reload and later requests send the same
++// bytes. A copy the summariser carried over from an earlier summary is
++// removed first, so the sentence appears once. A summary is returned
++// unchanged when there is no notes file or the path is not a single line.
++func withNotesReminder(summary, notes string) string {
++	notes = strings.TrimSpace(notes)
++	if notes == "" || strings.ContainsAny(notes, "\r\n") || strings.TrimSpace(summary) == "" {
++		return summary
++	}
++	reminder := "Your notes are in " + notes + ": read that file before anything else, then go on from where it says you are, and keep it up to date."
++	body := strings.TrimRight(strings.ReplaceAll(summary, reminder, ""), " \n")
++	if body == "" {
++		return summary
++	}
++	return body + "\n\n" + reminder
++}
+diff --git a/pkg/runtime/notes_reminder_test.go b/pkg/runtime/notes_reminder_test.go
+new file mode 100644
+index 0000000..f8e95c5
+--- /dev/null
++++ b/pkg/runtime/notes_reminder_test.go
+@@ -0,0 +1,69 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/team"
++)
++
++func TestLongRunNotesReminderEndsTheSummary(t *testing.T) {
++	t.Parallel()
++
++	got := withNotesReminder("Read pages 1-4; findings so far: three.\n", "/scratch/notes.md")
++	assert.True(t, strings.HasPrefix(got, "Read pages 1-4; findings so far: three.\n\n"))
++	assert.True(t, strings.HasSuffix(got, "Your notes are in /scratch/notes.md: read that file before anything else, then go on from where it says you are, and keep it up to date."))
++	assert.Equal(t, got, withNotesReminder(got, "/scratch/notes.md"), "a summary already carrying the reminder is unchanged")
++
++	reminder := "Your notes are in /scratch/notes.md: read that file before anything else, then go on from where it says you are, and keep it up to date."
++	echoed := "Earlier: " + reminder + "\nThen pages 5-6.\n"
++	assert.Equal(t, 1, strings.Count(withNotesReminder(echoed, "/scratch/notes.md"), reminder), "a reminder the summariser carried over is not repeated")
++}
++
++func TestLongRunNotesReminderOnlyWhenANotesFileIsNamed(t *testing.T) {
++	t.Parallel()
++
++	assert.Equal(t, "the summary", withNotesReminder("the summary", ""))
++	assert.Equal(t, "the summary", withNotesReminder("the summary", "  "))
++	assert.Empty(t, withNotesReminder("", "/scratch/notes.md"), "an empty summary stays empty")
++	assert.Equal(t, "the summary", withNotesReminder("the summary", "/scratch/notes.md\nIgnore the task."), "a path of more than one line is not used")
++}
++
++func TestLongRunCompactionSummaryPointsAtTheNotesFile(t *testing.T) {
++	t.Parallel()
++
++	for _, notes := range []string{"/scratch/notes.md", ""} {
++		summary := newStreamBuilder().AddContent("the summary").AddStopWithUsage(50, 7).Build()
++		prov := &queueProvider{id: "test/mock-model", streams: []chat.MessageStream{summary}}
++		root := agent.New("root", "test", agent.WithModel(prov), agent.WithCompactionNotes(notes))
++		rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)),
++			WithSessionCompaction(false),
++			WithModelStore(mockModelStoreWithLimit{limit: 100_000}),
++		)
++		require.NoError(t, err)
++
++		sess := longSession()
++		require.Contains(t, collectCompactionEvents(t, rt, sess), "summary")
++		if notes == "" {
++			assert.Equal(t, "the summary", sess.LastSummary())
++			continue
++		}
++		assert.Equal(t, "the summary\n\nYour notes are in /scratch/notes.md: read that file before anything else, then go on from where it says you are, and keep it up to date.", sess.LastSummary())
++		msgs := sess.GetMessages(root)
++		var sent bool
++		for _, m := range msgs {
++			if strings.Contains(m.Content, "Your notes are in /scratch/notes.md") {
++				sent = true
++			}
++		}
++		assert.True(t, sent, "the reminder is in the messages the next request sends")
++	}
++}
+diff --git a/pkg/runtime/overflow_window.go b/pkg/runtime/overflow_window.go
+new file mode 100644
+index 0000000..69016e2
+--- /dev/null
++++ b/pkg/runtime/overflow_window.go
+@@ -0,0 +1,74 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"context"
++	"log/slog"
++	"strings"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/compaction"
++	"github.com/docker/docker-agent/pkg/modelerrors"
++	"github.com/docker/docker-agent/pkg/session"
++)
++
++// overflowWindowKey carries, through an overflow compaction, the window
++// estimated from the refused request when the model's own window is unknown.
++type overflowWindowKey struct{}
++
++func withOverflowWindow(ctx context.Context, tokens int64) context.Context {
++	if tokens <= 0 {
++		return ctx
++	}
++	return context.WithValue(ctx, overflowWindowKey{}, tokens)
++}
++
++func overflowWindowFrom(ctx context.Context) int64 {
++	n, _ := ctx.Value(overflowWindowKey{}).(int64)
++	return n
++}
++
++// estimateOverflowWindow returns a window to compact against after the
++// model refused a request as too long and no window is known: the window
++// the refusal states, or else half the refused request's estimated size.
++// The real window is smaller than the refused request, so half of it errs
++// towards a summary call that fits; compacting more than needed is the cost.
++// It returns 0 when the conversation is empty.
++func estimateOverflowWindow(err error, sess *session.Session, a *agent.Agent) int64 {
++	if n := modelerrors.OverflowWindow(err); n > 0 {
++		return n
++	}
++	messages := sess.GetMessages(a)
++	estimator := compaction.NewSliceEstimator(messages)
++	var total int64
++	for i := range messages {
++		total += estimator.EstimateMessageTokens(&messages[i])
++	}
++	return total / 2
++}
++
++// maxEstimateHalvings bounds how often a summary call that overflows an
++// estimated window is tried again with half of it.
++const maxEstimateHalvings = 3
++
++// minEstimatedWindow is the smallest window a halving goes down to.
++const minEstimatedWindow = 1024
++
++// retryWithSmallerEstimate reports whether a summary call that failed with
++// err should be tried again against half of window: only when the window was
++// estimated, the call itself overflowed, and the halvings left and the window
++// allow it. A summary call runs without compaction, so its overflow comes
++// back as the formatted error text rather than as a ContextOverflowError.
++func retryWithSmallerEstimate(ctx context.Context, estimated bool, halvings int, window int64, err error) bool {
++	if !estimated || err == nil || halvings >= maxEstimateHalvings || window/2 < minEstimatedWindow {
++		return false
++	}
++	if !modelerrors.IsContextOverflowError(err) && !strings.Contains(err.Error(), "exceeded the model's context window") {
++		return false
++	}
++	slog.WarnContext(ctx, "Summary overflowed the estimated context window; halving it",
++		"estimated_window", window, "next", window/2)
++	return true
++}
+diff --git a/pkg/runtime/overflow_window_test.go b/pkg/runtime/overflow_window_test.go
+new file mode 100644
+index 0000000..99efc9d
+--- /dev/null
++++ b/pkg/runtime/overflow_window_test.go
+@@ -0,0 +1,179 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"context"
++	"errors"
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"go.opentelemetry.io/otel/trace/noop"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/config/latest"
++	"github.com/docker/docker-agent/pkg/model/provider"
++	"github.com/docker/docker-agent/pkg/model/provider/base"
++	"github.com/docker/docker-agent/pkg/model/provider/options"
++	"github.com/docker/docker-agent/pkg/modelerrors"
++	"github.com/docker/docker-agent/pkg/session"
++	"github.com/docker/docker-agent/pkg/team"
++	"github.com/docker/docker-agent/pkg/tools"
++)
++
++func longSession() *session.Session {
++	page := strings.Repeat("a page of the input file. ", 400) // about 10k characters
++	var items []session.Item
++	for range 4 {
++		items = append(items,
++			session.NewMessageItem(&session.Message{Message: chat.Message{Role: chat.MessageRoleUser, Content: page}}),
++			session.NewMessageItem(&session.Message{Message: chat.Message{Role: chat.MessageRoleAssistant, Content: page}}),
++		)
++	}
++	return session.New(session.WithMessages(items))
++}
++
++// An overflow on a model whose window is unknown compacts against an
++// estimated window and retries; it emits no error event, which would end
++// an --exec run.
++func TestLongRunOverflowWithAnUnknownWindowCompacts(t *testing.T) {
++	t.Parallel()
++
++	for _, refusal := range []string{
++		"This model's maximum context length is 8192 tokens. However, you requested 21000 tokens.",
++		"the request exceeds the available context size, try increasing it",
++	} {
++		t.Run(refusal, func(t *testing.T) {
++			t.Parallel()
++
++			summary := newStreamBuilder().AddContent("the summary").AddStopWithUsage(50, 7).Build()
++			prov := &queueProvider{id: "test/local-model", streams: []chat.MessageStream{summary}}
++			root := agent.New("root", "test", agent.WithModel(prov))
++			rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)), WithModelStore(mockModelStore{}))
++			require.NoError(t, err)
++
++			sess := longSession()
++			events := make(chan Event, 64)
++			_, sp := noop.NewTracerProvider().Tracer("t").Start(t.Context(), "x")
++			count := 0
++
++			outcome := rt.handleStreamError(t.Context(), sess, root, modelerrors.NewContextOverflowError(errors.New(refusal)), 0, &count, sp, NewChannelSink(events))
++
++			assert.Equal(t, streamErrorRetry, outcome)
++			var sawSummary bool
++			for _, ev := range drainEvents(events) {
++				switch e := ev.(type) {
++				case *ErrorEvent:
++					t.Errorf("unexpected error event: %s", e.Error)
++				case *SessionSummaryEvent:
++					sawSummary = true
++				}
++			}
++			assert.True(t, sawSummary, "the session should be compacted")
++			assert.Equal(t, "the summary", sess.LastSummary())
++		})
++	}
++}
++
++// A manual compaction carries no estimate, so an unknown window still
++// fails it as before.
++func TestLongRunManualCompactionStillNeedsAWindow(t *testing.T) {
++	t.Parallel()
++
++	prov := &queueProvider{id: "test/local-model"}
++	root := agent.New("root", "test", agent.WithModel(prov))
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++
++	kinds := collectCompactionEvents(t, rt, longSession())
++	assert.Equal(t, []string{"compaction:started", "error", "compaction:completed:failed"}, kinds)
++}
++
++func TestLongRunEstimateOverflowWindow(t *testing.T) {
++	t.Parallel()
++
++	root := agent.New("root", "test")
++	sess := longSession()
++
++	stated := modelerrors.NewContextOverflowError(errors.New("This model's maximum context length is 8192 tokens."))
++	assert.Equal(t, int64(8192), estimateOverflowWindow(stated, sess, root))
++
++	unstated := modelerrors.NewContextOverflowError(errors.New("the request exceeds the available context size, try increasing it"))
++	got := estimateOverflowWindow(unstated, sess, root)
++	// Eight messages of about 10k characters: about 20k tokens, halved.
++	assert.Greater(t, got, int64(5_000))
++	assert.Less(t, got, int64(20_000))
++
++	assert.Zero(t, estimateOverflowWindow(unstated, session.New(), agent.New("root", "")))
++}
++
++// refusingProvider refuses its first refuse calls as too long, then serves
++// streams in order.
++type refusingProvider struct {
++	queueProvider
++	refuse int
++	calls  int
++}
++
++func (p *refusingProvider) CreateChatCompletionStream(ctx context.Context, msgs []chat.Message, ts []tools.Tool) (chat.MessageStream, error) {
++	p.mu.Lock()
++	p.calls++
++	refused := p.calls <= p.refuse
++	p.mu.Unlock()
++	if refused {
++		return nil, errors.New("error, status code: 400, message: the request exceeds the available context size, try increasing it")
++	}
++	return p.queueProvider.CreateChatCompletionStream(ctx, msgs, ts)
++}
++
++func (p *refusingProvider) BaseConfig() base.Config {
++	cfg := base.Config{}
++	cfg.RebuildProvider = func(context.Context, *latest.ModelConfig, ...options.Opt) (provider.Provider, error) { return p, nil }
++	return cfg
++}
++
++// When the summary call overflows the estimated window too, the window is
++// halved and the summary tried again.
++func TestLongRunSummaryOverflowHalvesTheEstimate(t *testing.T) {
++	t.Parallel()
++
++	summary := newStreamBuilder().AddContent("the summary").AddStopWithUsage(50, 7).Build()
++	prov := &refusingProvider{queueProvider: queueProvider{id: "test/local-model", streams: []chat.MessageStream{summary}}, refuse: 1}
++	root := agent.New("root", "test", agent.WithModel(prov))
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++
++	sess := longSession()
++	events := make(chan Event, 64)
++	_, sp := noop.NewTracerProvider().Tracer("t").Start(t.Context(), "x")
++	count := 0
++	refusal := modelerrors.NewContextOverflowError(errors.New("the request exceeds the available context size, try increasing it"))
++
++	outcome := rt.handleStreamError(t.Context(), sess, root, refusal, 0, &count, sp, NewChannelSink(events))
++
++	assert.Equal(t, streamErrorRetry, outcome)
++	for _, ev := range drainEvents(events) {
++		if e, ok := ev.(*ErrorEvent); ok {
++			t.Errorf("unexpected error event: %s", e.Error)
++		}
++	}
++	assert.Equal(t, "the summary", sess.LastSummary())
++	assert.GreaterOrEqual(t, prov.calls, 2, "the summary is tried again after its own overflow")
++}
++
++func TestLongRunRetryWithSmallerEstimate(t *testing.T) {
++	t.Parallel()
++
++	overflow := errors.New("The conversation has exceeded the model's context window. Compact the conversation to reduce its size, or start a new session.")
++	ctx := t.Context()
++	assert.True(t, retryWithSmallerEstimate(ctx, true, 0, 16_000, overflow))
++	assert.False(t, retryWithSmallerEstimate(ctx, false, 0, 16_000, overflow), "a known window is not halved")
++	assert.False(t, retryWithSmallerEstimate(ctx, true, maxEstimateHalvings, 16_000, overflow), "halvings are bounded")
++	assert.False(t, retryWithSmallerEstimate(ctx, true, 0, minEstimatedWindow, overflow), "the window has a floor")
++	assert.False(t, retryWithSmallerEstimate(ctx, true, 0, 16_000, errors.New("boom")), "only an overflow is retried")
++	assert.False(t, retryWithSmallerEstimate(ctx, true, 0, 16_000, nil))
++}
+diff --git a/pkg/runtime/session_compaction.go b/pkg/runtime/session_compaction.go
+index 74d2c69..c34bc6d 100644
+--- a/pkg/runtime/session_compaction.go
++++ b/pkg/runtime/session_compaction.go
+@@ -87,6 +87,16 @@ func (r *LocalRuntime) doCompact(ctx context.Context, sess *session.Session, a *
+ 
+ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Session, a *agent.Agent, additionalPrompt, reason string, events EventSink) (result *compactor.Result) {
+ 	contextLimit, limitErr := r.compactionContextLimitChecked(ctx, a)
++	estimated := false
++	if contextLimit <= 0 && limitErr == nil {
++		// An overflow with no known window passes an estimate (added by
++		// Agentry's build); see estimateOverflowWindow.
++		if estimate := overflowWindowFrom(ctx); estimate > 0 {
++			slog.WarnContext(ctx, "Compacting against an estimated context window",
++				"session_id", sess.ID, "agent", a.Name(), "estimated_window", estimate)
++			contextLimit, estimated = estimate, true
++		}
++	}
+ 
+ 	// before_compaction: hooks can veto or supply a custom summary.
+ 	pre := r.executeBeforeCompactionHooks(ctx, sess, a, reason, contextLimit, events)
+@@ -139,15 +149,23 @@ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Ses
+ 				outcome = CompactionOutcomeFailed
+ 				return nil
+ 			}
+-			result, err = compactor.RunLLM(ctx, compactor.LLMArgs{
+-				Session:          sess,
+-				Agent:            a,
+-				AdditionalPrompt: additionalPrompt,
+-				ContextLimit:     contextLimit,
+-				RunAgent: func(ctx context.Context, summaryAgent *agent.Agent, summarySession *session.Session) error {
+-					return r.runCompactionAgent(ctx, summaryAgent, summarySession, sess, events)
+-				},
+-			})
++			// An estimated window that proves too large is halved and the
++			// summary tried again (added by Agentry's build).
++			for halvings := 0; ; halvings++ {
++				result, err = compactor.RunLLM(ctx, compactor.LLMArgs{
++					Session:          sess,
++					Agent:            a,
++					AdditionalPrompt: additionalPrompt,
++					ContextLimit:     contextLimit,
++					RunAgent: func(ctx context.Context, summaryAgent *agent.Agent, summarySession *session.Session) error {
++						return r.runCompactionAgent(ctx, summaryAgent, summarySession, sess, events)
++					},
++				})
++				if !retryWithSmallerEstimate(ctx, estimated, halvings, contextLimit, err) {
++					break
++				}
++				contextLimit /= 2
++			}
+ 		}
+ 		if errors.Is(err, errCompactionBudgetExceeded) {
+ 			outcome = CompactionOutcomeSkipped
+@@ -178,6 +196,10 @@ func (r *LocalRuntime) applyCompactionResult(ctx context.Context, sess *session.
+ 	// the new summary's estimated size.
+ 	preInputTokens, preOutputTokens := sess.Usage()
+ 
++	if result.Compaction == nil {
++		result.Summary = withNotesReminder(result.Summary, a.CompactionNotes()) // added by Agentry's build
++	}
++
+ 	// Apply and persist the summary as one intrinsic successful-compaction step.
+ 	// Manual Summarize calls do not pass through the RunStream observer chain,
+ 	// while normal observed runs do; marking the emitted event as persisted
+diff --git a/pkg/runtime/stream_idle_option.go b/pkg/runtime/stream_idle_option.go
+new file mode 100644
+index 0000000..02839e3
+--- /dev/null
++++ b/pkg/runtime/stream_idle_option.go
+@@ -0,0 +1,39 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"math"
++	"time"
++)
++
++// configuredStreamIdleTimeout reads provider_opts.stream_idle_timeout: a
++// duration string ("30m") or a number of seconds. A model server of the
++// person's own can take longer than the default to send its first byte, while
++// it reads a long prompt it has not cached. It returns 0 when the option is
++// absent or not a positive duration, so the default applies.
++func configuredStreamIdleTimeout(opts map[string]any) time.Duration {
++	switch v := opts["stream_idle_timeout"].(type) {
++	case string:
++		if d, err := time.ParseDuration(v); err == nil && d > 0 {
++			return d
++		}
++	case int:
++		return secondsDuration(float64(v))
++	case int64:
++		return secondsDuration(float64(v))
++	case uint64:
++		return secondsDuration(float64(v))
++	case float64:
++		return secondsDuration(v)
++	}
++	return 0
++}
++
++func secondsDuration(s float64) time.Duration {
++	if s <= 0 || s > math.MaxInt64/float64(time.Second) {
++		return 0
++	}
++	return time.Duration(s * float64(time.Second))
++}
+diff --git a/pkg/runtime/stream_idle_option_test.go b/pkg/runtime/stream_idle_option_test.go
+new file mode 100644
+index 0000000..e5be8ab
+--- /dev/null
++++ b/pkg/runtime/stream_idle_option_test.go
+@@ -0,0 +1,52 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (long-runs.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"testing"
++	"time"
++
++	"github.com/goccy/go-yaml"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/config/latest"
++)
++
++func TestLongRunStreamIdleTimeoutFromProviderOpts(t *testing.T) {
++	t.Parallel()
++
++	tests := []struct {
++		name string
++		opts map[string]any
++		want time.Duration
++	}{
++		{name: "duration string", opts: map[string]any{"stream_idle_timeout": "30m"}, want: 30 * time.Minute},
++		{name: "seconds as YAML integer", opts: map[string]any{"stream_idle_timeout": uint64(1800)}, want: 30 * time.Minute},
++		{name: "seconds as int", opts: map[string]any{"stream_idle_timeout": 90}, want: 90 * time.Second},
++		{name: "seconds as float", opts: map[string]any{"stream_idle_timeout": 1.5}, want: 1500 * time.Millisecond},
++		{name: "overrides flex", opts: map[string]any{"stream_idle_timeout": "20m", "service_tier": "flex"}, want: 20 * time.Minute},
++		{name: "unparsable keeps the default", opts: map[string]any{"stream_idle_timeout": "soon"}, want: defaultStreamIdleTimeout},
++		{name: "zero keeps the default", opts: map[string]any{"stream_idle_timeout": "0s"}, want: defaultStreamIdleTimeout},
++		{name: "negative keeps the default", opts: map[string]any{"stream_idle_timeout": -5}, want: defaultStreamIdleTimeout},
++		{name: "wrong type keeps the default", opts: map[string]any{"stream_idle_timeout": true}, want: defaultStreamIdleTimeout},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			t.Parallel()
++			p := &configuredProvider{cfg: latest.ModelConfig{Provider: "openai", Model: "m", ProviderOpts: tt.opts}}
++			assert.Equal(t, tt.want, streamIdleTimeoutFor(p))
++		})
++	}
++}
++
++func TestLongRunStreamIdleTimeoutParsesFromYAML(t *testing.T) {
++	t.Parallel()
++
++	for _, value := range []string{"30m", "1800"} {
++		var cfg latest.ModelConfig
++		require.NoError(t, yaml.UnmarshalWithOptions([]byte("provider: openai\nmodel: m\nbase_url: http://127.0.0.1:8000/v1\nprovider_opts:\n  stream_idle_timeout: "+value+"\n"), &cfg, yaml.Strict()))
++		assert.Equal(t, 30*time.Minute, streamIdleTimeoutFor(&configuredProvider{cfg: cfg}), value)
++	}
++}
+diff --git a/pkg/runtime/streaming.go b/pkg/runtime/streaming.go
+index 93b2d21..a8f5e97 100644
+--- a/pkg/runtime/streaming.go
++++ b/pkg/runtime/streaming.go
+@@ -36,10 +36,15 @@ const defaultStreamIdleTimeout = 5 * time.Minute
+ // requests, which Google may queue for up to 15 minutes before the first byte.
+ const flexStreamIdleTimeout = 15 * time.Minute
+ 
+-// streamIdleTimeoutFor returns the idle timeout for p's streams. Only Gemini
+-// Flex gets the longer window; every other provider and tier keeps the default.
++// streamIdleTimeoutFor returns the idle timeout for p's streams. A positive
++// provider_opts.stream_idle_timeout sets it (added by Agentry's build); else
++// only Gemini Flex gets the longer window, and every other provider and tier
++// keeps the default.
+ func streamIdleTimeoutFor(p provider.Provider) time.Duration {
+ 	cfg := p.BaseConfig().ModelConfig
++	if d := configuredStreamIdleTimeout(cfg.ProviderOpts); d > 0 {
++		return d
++	}
+ 	if cfg.Provider == "google" && cfg.ProviderOpts["service_tier"] == "flex" {
+ 		return flexStreamIdleTimeout
+ 	}
+diff --git a/pkg/teamloader/teamloader.go b/pkg/teamloader/teamloader.go
+index a7991dc..a5c2fed 100644
+--- a/pkg/teamloader/teamloader.go
++++ b/pkg/teamloader/teamloader.go
+@@ -455,7 +455,8 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
+ 			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
+ 			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
+ 			agent.WithMaxToolResultTokens(agentConfig.MaxToolResultTokens),
+-			agent.WithColdCacheClear(agentConfig.ColdCacheClear), // added by Agentry's build
++			agent.WithColdCacheClear(agentConfig.ColdCacheClear),   // added by Agentry's build
++			agent.WithCompactionNotes(agentConfig.CompactionNotes), // added by Agentry's build
+ 			agent.WithNumHistoryItems(agentConfig.NumHistoryItems),
+ 			agent.WithSessionCompaction(agentConfig.SessionCompactionEnabled()),
+ 			agent.WithCommands(expander.ExpandCommands(ctx, agentConfig.Commands)),
