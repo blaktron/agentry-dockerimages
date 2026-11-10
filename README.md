@@ -552,7 +552,7 @@ does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
   setting, and for a provider's own (native) compaction, a summary is
   unchanged.
 
-The image keeps `long-runs.patch` and `loop-nudge.patch` beside the first patch.
+The image keeps `long-runs.patch` beside the first patch.
 
 It leaves `agent-schema.json` alone for the same reason as the first patch, so
 `TestSchemaMatchesGoTypes` also names `compaction_notes`. Its window-free
@@ -565,7 +565,8 @@ definition", so that test fails on the patched tree.
 the run with a `loop_detected` error when the model makes the same tool call
 with the same arguments `max_consecutive_tool_calls` times in a row (default
 5; 0 also means 5, so upstream has no way to turn it off). With the patch the
-next model request carries one transient system message instead. The message:
+run goes on, and a message to the agent is added to the conversation right
+after the results of the repeated call. The message:
 
 - names the tool and the count, never the arguments;
 - says that repeating the call will not get a different result;
@@ -575,16 +576,21 @@ next model request carries one transient system message instead. The message:
   next step or end the run, finishing with what is done or calling a tool for
   ending a run as blocked if it has one (such as `end_blocked`).
 
-The detector then resets, and every later streak gets the message again, with
-the count of earlier ones. The message rides the request the way upstream's
-structured-output reminder does: it is never stored in the session, and it is
-cleared once a model call that carried it succeeds. Each nudge is a `Warning`
-event whose message starts `Loop nudge <n>:`, and a log line, so a caller can
-count them. Polling tools stay exempt as upstream has them. The run's own
+The message is an implicit user message, as upstream's note for a forced
+handoff is, and starts "Note from the agent runtime, not the user". The next
+request therefore ends with it, where the model decides its next step, and the
+user's transcript does not show it. It stays in the session's history, so a
+reload or a compaction keeps it. The detector then resets, and every later
+streak gets the message again, with the count of earlier ones. Each nudge is a
+`Warning` event whose message starts `Loop nudge <n>:`, and a log line, so a
+caller can count them. The tool is named only when its name has the shape
+upstream accepts for a tool (letters, digits, `_` and `-`, at most 64);
+otherwise the message says "a tool". Polling tools stay exempt as upstream has them. The run's own
 limits (iterations, budget, the caller's timeout) still end a run that never
 stops repeating. Upstream's `TestRunStream_RepeatedDatetimeReads` and
 `TestRunStream_FailedRandomDrawsTriggerLoopDetection` expected the
-termination; the patch rewrites them to expect the nudge.
+termination; the patch rewrites them to expect the nudge. The image keeps
+`loop-nudge.patch` beside the other two.
 
 **Re-porting the patches on a commit bump.** Apply them in order to the new
 commit (`git apply --3way build/docker-agent/cold-cache-clear.patch`, commit,
@@ -602,9 +608,8 @@ before its loop), the agent config's latest schema and the teamloader's agent
 options. The second's are the overflow matcher's token patterns, the overflow
 branch of `handleStreamError`, `generateCompaction`'s context limit,
 `applyCompactionResult`, `streamIdleTimeoutFor` and the same config and
-teamloader points. The third's are the loop-detected branch of `runTurn`, the
-transient extras of its request assembly, the reset after a successful model
-call and the agent-switch reset in `runStreamLoop`. Write each back with `git diff` against the tree before it
+teamloader points. The third's are the loop-detected branch of `runTurn` and
+the `loopState` struct. Write each back with `git diff` against the tree before it
 (`cold-cache-clear.patch` against upstream, `long-runs.patch` against the
 first patch's commit, `loop-nudge.patch` against the second's). The build
 applies all three with `patch --fuzz=0`, so a hunk

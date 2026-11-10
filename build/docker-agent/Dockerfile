@@ -60,13 +60,13 @@
 #   8. loop-nudge.patch, applied with no fuzz after both, stops the loop
 #      detector from ending a run. When the model makes the same tool call with
 #      the same arguments max_consecutive_tool_calls times in a row (default
-#      5), the next request carries one transient system message that names the
-#      tool and the count, never the arguments, and tells the agent to reach
-#      the goal another way, or to say why it cannot and move on or end the
-#      run; the detector resets, and every later streak gets the message again
-#      with the count of earlier ones. Each nudge is a Warning event starting
-#      "Loop nudge". The run's own limits still apply. Its tests run in the
-#      build.
+#      5), an implicit user message is added after the call's results. It
+#      names the tool and the count, never the arguments, and tells the agent
+#      to reach the goal another way, or to say why it cannot and move on or
+#      end the run; the detector resets, and every later streak gets the
+#      message again with the count of earlier ones. Each nudge is a Warning
+#      event starting "Loop nudge". The run's own limits still apply. Its
+#      tests run in the build.
 #
 # The patches' files carry a note that Agentry's build adds or changes them, and
 # the image keeps the three patches at /usr/share/doc/docker-agent/.
@@ -120,11 +120,12 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LongRun' \
 	./pkg/modelerrors ./pkg/runtime ./pkg/config/latest
-# loop-nudge.patch's tests: a streak nudges the agent and the run goes on, every
-# streak is nudged again with the count, a run that never repeats is unchanged,
-# polling tools stay exempt, the nudge names the tool and the count but never
-# the arguments and is never stored, and the upstream tests that expected a
-# streak to end the run now expect the nudge.
+# loop-nudge.patch's tests: a streak nudges the agent and the run goes on, the
+# next request ends with the nudge after the call's result, every streak is
+# nudged again with the count, the agent can still end the run, a run that
+# never repeats is unchanged, polling tools stay exempt, the nudge names the
+# tool and the count but never the arguments, and the upstream tests that
+# expected a streak to end the run now expect the nudge.
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection' \

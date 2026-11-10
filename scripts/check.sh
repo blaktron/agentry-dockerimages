@@ -1404,7 +1404,9 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the long-runs changes (long-runs.patch)"
 		bad=1
 	fi
-	if grep -aq 'You have made the same call to ' "$out/docker-agent" && ! grep -aq 'Agent terminated: detected ' "$out/docker-agent"; then
+	# The two strings are the nudge's text (loopNudgeText in the patch) and
+	# upstream's termination message; change them with either.
+	if grep -aq 'Note from the agent runtime, not the user: you have made the same call to ' "$out/docker-agent" && ! grep -aq 'Agent terminated: detected ' "$out/docker-agent"; then
 		echo "ok   the binary carries the loop nudge, not the loop termination"
 	else
 		echo "FAIL the binary does not carry the loop nudge (loop-nudge.patch)"
