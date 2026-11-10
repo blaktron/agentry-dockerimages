@@ -534,7 +534,11 @@ does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
   `n_ctx`), or else half the refused request's estimated size. If the summary
   call overflows that estimate too, the window is halved and the summary tried
   again, up to three times and never below 1024 tokens. A manual `/compact`
-  with no known window fails as before.
+  with no known window fails as before. Since v1.158.0 upstream also retries
+  a summary that overflows, with half the conversation, up to three times, for
+  any window. The two nest when the window is estimated: each estimate gets
+  upstream's retries, so a summary can take up to sixteen calls before the
+  compaction gives up. With a known window only upstream's retry runs.
 - **`provider_opts.stream_idle_timeout`.** A duration (`30m`) or a number of
   seconds replaces the 5-minute limit on a model's silent stream. A server of
   the person's own can take longer than that to send its first byte while it
