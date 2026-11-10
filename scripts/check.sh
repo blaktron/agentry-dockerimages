@@ -145,8 +145,9 @@
 #       read-only root, the image's own user), and fail unless the user is not
 #       root, `docker-agent version` names source.env's tag and commit,
 #       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
-#       the binary is static, it carries the cold-cache clear and the
-#       long-runs changes and the image keeps both patches, and it links
+#       the binary is static, it carries the cold-cache clear, the
+#       long-runs changes and the loop nudge and the image keeps the three
+#       patches, and it links
 #       golang.org/x/net v0.62.0 or later.
 #       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
@@ -1299,6 +1300,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name long-runs.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/loop-nudge.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/loop-nudge.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*loop-nudge\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply loop-nudge.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'LoopNudge|" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run loop-nudge.patch's tests"
+		bad=1
+	elif ! grep -q 'loop-nudge\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name loop-nudge.patch"
+		bad=1
+	fi
 	return "$bad"
 }
 
@@ -1307,7 +1321,8 @@ checkDockerAgent() {
 # user) and fails unless the user is not root, `docker-agent version` names
 # source.env's tag and commit, DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file
 # is setuid or setgid, the binary is static, it carries the cold-cache clear
-# and the long-runs changes (their config keys), the image keeps both patches,
+# the long-runs changes (their config keys) and the loop nudge (its message),
+# the image keeps the three patches,
 # and the binary links golang.org/x/net v0.62.0 or later. PLATFORM asks for,
 # and checks, one architecture.
 dockerAgentImage() {
@@ -1389,8 +1404,14 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the long-runs changes (long-runs.patch)"
 		bad=1
 	fi
+	if grep -aq 'You have made the same call to ' "$out/docker-agent" && ! grep -aq 'Agent terminated: detected ' "$out/docker-agent"; then
+		echo "ok   the binary carries the loop nudge, not the loop termination"
+	else
+		echo "FAIL the binary does not carry the loop nudge (loop-nudge.patch)"
+		bad=1
+	fi
 	local patch
-	for patch in cold-cache-clear.patch long-runs.patch; do
+	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch; do
 		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
 			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
 		else

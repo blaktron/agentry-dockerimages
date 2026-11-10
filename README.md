@@ -55,7 +55,7 @@ list. Built images are listed with what they are built from.
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear and long-runs patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear, long-runs and loop-nudge patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -497,8 +497,8 @@ from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
 linked; otel's `otlptracegrpc` exporter is raised to the release that fixes the
-advisory reported against upstream's pin; and it carries two patches,
-`cold-cache-clear.patch` and then `long-runs.patch`.
+advisory reported against upstream's pin; and it carries three patches,
+`cold-cache-clear.patch`, then `long-runs.patch`, then `loop-nudge.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that
@@ -552,29 +552,64 @@ does not know the setting, and upstream's `TestSchemaMatchesGoTypes` in
   setting, and for a provider's own (native) compaction, a summary is
   unchanged.
 
-The image keeps `long-runs.patch` beside the first patch.
+The image keeps `long-runs.patch` and `loop-nudge.patch` beside the first patch.
 
 It leaves `agent-schema.json` alone for the same reason as the first patch, so
-`TestSchemaMatchesGoTypes` also names `compaction_notes`.
+`TestSchemaMatchesGoTypes` also names `compaction_notes`. Its window-free
+compaction also changes what upstream's
+`TestPromptCompactionDiagnosticDoesNotOverrideRecovery` in `pkg/acp` sees: the
+run compacts and recovers instead of reporting "Failed to get model
+definition", so that test fails on the patched tree.
+
+`loop-nudge.patch` stops the loop detector from ending a run. Upstream ends
+the run with a `loop_detected` error when the model makes the same tool call
+with the same arguments `max_consecutive_tool_calls` times in a row (default
+5; 0 also means 5, so upstream has no way to turn it off). With the patch the
+next model request carries one transient system message instead. The message:
+
+- names the tool and the count, never the arguments;
+- says that repeating the call will not get a different result;
+- tells the agent to reach the same goal another way (a different tool or
+  different arguments, or its checklist or plan for what is left);
+- if the goal cannot be reached, tells it to say why, then move on to the
+  next step or end the run, finishing with what is done or calling a tool for
+  ending a run as blocked if it has one (such as `end_blocked`).
+
+The detector then resets, and every later streak gets the message again, with
+the count of earlier ones. The message rides the request the way upstream's
+structured-output reminder does: it is never stored in the session, and it is
+cleared once a model call that carried it succeeds. Each nudge is a `Warning`
+event whose message starts `Loop nudge <n>:`, and a log line, so a caller can
+count them. Polling tools stay exempt as upstream has them. The run's own
+limits (iterations, budget, the caller's timeout) still end a run that never
+stops repeating. Upstream's `TestRunStream_RepeatedDatetimeReads` and
+`TestRunStream_FailedRandomDrawsTriggerLoopDetection` expected the
+termination; the patch rewrites them to expect the nudge.
 
 **Re-porting the patches on a commit bump.** Apply them in order to the new
 commit (`git apply --3way build/docker-agent/cold-cache-clear.patch`, commit,
-then `git apply --3way build/docker-agent/long-runs.patch`, in a clone at
+then `git apply --3way build/docker-agent/long-runs.patch`, commit, then
+`git apply --3way build/docker-agent/loop-nudge.patch`, in a clone at
 `UPSTREAM_COMMIT`), resolve what no longer matches, and run their tests there:
 `go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
-./pkg/runtime ./pkg/config/latest` and `go test -tags no_audio -run 'LongRun'
-./pkg/modelerrors ./pkg/runtime ./pkg/config/latest`. The first patch's hooks
+./pkg/runtime ./pkg/config/latest`, `go test -tags no_audio -run 'LongRun'
+./pkg/modelerrors ./pkg/runtime ./pkg/config/latest` and `go test -tags
+no_audio -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection'
+./pkg/runtime`. The first patch's hooks
 are the session's two history assemblies (`getMessages` and
 `CompactionInput`), the run loop's first model request (`runStreamLoop`,
 before its loop), the agent config's latest schema and the teamloader's agent
 options. The second's are the overflow matcher's token patterns, the overflow
 branch of `handleStreamError`, `generateCompaction`'s context limit,
 `applyCompactionResult`, `streamIdleTimeoutFor` and the same config and
-teamloader points. Write each back with `git diff` against the tree before it
+teamloader points. The third's are the loop-detected branch of `runTurn`, the
+transient extras of its request assembly, the reset after a successful model
+call and the agent-switch reset in `runStreamLoop`. Write each back with `git diff` against the tree before it
 (`cold-cache-clear.patch` against upstream, `long-runs.patch` against the
-first patch's commit). The build applies both with `patch --fuzz=0`, so a hunk
+first patch's commit, `loop-nudge.patch` against the second's). The build
+applies all three with `patch --fuzz=0`, so a hunk
 that moved fails the build rather than landing nearby, and runs their tests
-before the binary is built; `scripts/check.sh` fails if either patch, its
+before the binary is built; `scripts/check.sh` fails if any patch, its
 application or its tests leave the Dockerfile.
 
 The `docker-agent` workflow builds it natively for amd64 and arm64, runs each
