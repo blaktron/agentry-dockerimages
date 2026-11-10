@@ -62,6 +62,13 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    nine files of its own under `pkg/modelerrors`, `pkg/runtime` and
    `pkg/config/latest`, each headed as not part of upstream. The image keeps
    it beside the first.
+8. `build/docker-agent/loop-nudge.patch` is applied after both. A run of
+   identical tool calls no longer ends the run: the agent gets a message
+   telling it to reach its goal another way, and the run goes on. It changes
+   `pkg/runtime/loop.go`, `pkg/runtime/datetime_test.go` and
+   `pkg/runtime/random_test.go`, each marked where it changes them, and adds
+   two files of its own under `pkg/runtime`, each headed as not part of
+   upstream. The image keeps it beside the other two.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
