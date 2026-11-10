@@ -1,5 +1,5 @@
 diff --git a/pkg/agent/agent.go b/pkg/agent/agent.go
-index 61ab43c71..3948ceec0 100644
+index f70afdb9d..ea13b4bf6 100644
 --- a/pkg/agent/agent.go
 +++ b/pkg/agent/agent.go
 @@ -52,6 +52,7 @@ type Agent struct {
@@ -10,7 +10,7 @@ index 61ab43c71..3948ceec0 100644
  	numHistoryItems         int
  	addPromptFiles          []string
  	addPromptFilesDepth     int
-@@ -150,6 +151,12 @@ func (a *Agent) MaxToolResultTokens() int {
+@@ -151,6 +152,12 @@ func (a *Agent) MaxToolResultTokens() int {
  	return a.maxToolResultTokens
  }
  
@@ -24,10 +24,10 @@ index 61ab43c71..3948ceec0 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index adafe7b28..66f28c6d3 100644
+index cf92870ce..4e1a4f13d 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -262,6 +262,42 @@ func WithMaxToolResultTokens(n int) Opt {
+@@ -276,6 +276,42 @@ func WithMaxToolResultTokens(n int) Opt {
  	}
  }
  
@@ -130,7 +130,7 @@ index 000000000..c6dff67e3
 +	}
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index fd20c9636..ed33918ec 100644
+index 89e6abbff..8e78c05e8 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
 @@ -533,6 +533,19 @@ type FallbackConfig struct {
@@ -153,7 +153,7 @@ index fd20c9636..ed33918ec 100644
  // Duration is a wrapper around time.Duration that supports YAML/JSON unmarshaling
  // from string format (e.g., "1m", "30s", "2h30m").
  type Duration struct {
-@@ -776,6 +789,10 @@ type AgentConfig struct {
+@@ -773,6 +786,10 @@ type AgentConfig struct {
  	// Disabled by default; only positive values enable the cap.
  	MaxToolResultTokens int `json:"max_tool_result_tokens,omitempty"`
  	NumHistoryItems     int `json:"num_history_items,omitempty"`
@@ -165,7 +165,7 @@ index fd20c9636..ed33918ec 100644
  	// the proactive threshold trigger and the post-overflow auto-recovery.
  	// Manual /compact stays available regardless. Pointer (tri-state) so
 diff --git a/pkg/config/latest/validate.go b/pkg/config/latest/validate.go
-index 5535d8859..99fe5975e 100644
+index 2a0f0a7b1..f3f58ecdb 100644
 --- a/pkg/config/latest/validate.go
 +++ b/pkg/config/latest/validate.go
 @@ -87,6 +87,9 @@ func (t *Config) Validate() error {
@@ -452,10 +452,10 @@ index 000000000..613e68ab4
 +	}
 +}
 diff --git a/pkg/runtime/loop.go b/pkg/runtime/loop.go
-index 1bf319425..4ef534581 100644
+index fe5245431..d0acacd50 100644
 --- a/pkg/runtime/loop.go
 +++ b/pkg/runtime/loop.go
-@@ -369,6 +369,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
+@@ -374,6 +374,11 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
  		}
  	}
  
@@ -889,10 +889,10 @@ index 000000000..a3b6a68f6
 +	assert.Equal(t, coldBase.Add(3*time.Minute), at)
 +}
 diff --git a/pkg/session/session.go b/pkg/session/session.go
-index 2cb3db3f3..47e0987b1 100644
+index 0143f3bf4..624d7d8f4 100644
 --- a/pkg/session/session.go
 +++ b/pkg/session/session.go
-@@ -2363,6 +2363,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
+@@ -2336,6 +2336,7 @@ func (s *Session) buildSessionSummaryMessages(items []Item) ([]chat.Message, int
  // on the same session.
  func (s *Session) CompactionInput() ([]chat.Message, []int, int) {
  	items := s.snapshotItems()
@@ -900,7 +900,7 @@ index 2cb3db3f3..47e0987b1 100644
  
  	lastSummaryIndex := -1
  	for i := range slices.Backward(items) {
-@@ -2505,6 +2506,7 @@ func (s *Session) getMessages(a *agent.Agent, state *InstructionContextState, ex
+@@ -2478,6 +2479,7 @@ func (s *Session) getMessages(a *agent.Agent, state *InstructionContextState, ex
  	// Take a snapshot of Messages under the lock, copying Message structs
  	// to avoid racing with UpdateMessage which may modify the pointed-to objects.
  	items := s.snapshotItems()
@@ -909,10 +909,10 @@ index 2cb3db3f3..47e0987b1 100644
  	var instructionUpdates []InstructionUpdate
  	if state != nil {
 diff --git a/pkg/teamloader/teamloader.go b/pkg/teamloader/teamloader.go
-index 809d7477b..fb5c96e78 100644
+index 8108811d2..b88d17d18 100644
 --- a/pkg/teamloader/teamloader.go
 +++ b/pkg/teamloader/teamloader.go
-@@ -446,6 +446,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
+@@ -466,6 +466,7 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
  			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
  			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
  			agent.WithMaxToolResultTokens(agentConfig.MaxToolResultTokens),

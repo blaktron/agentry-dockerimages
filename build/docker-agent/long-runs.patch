@@ -1,5 +1,5 @@
 diff --git a/pkg/agent/agent.go b/pkg/agent/agent.go
-index ea13b4b..78c4e41 100644
+index ea13b4bf6..78c4e418f 100644
 --- a/pkg/agent/agent.go
 +++ b/pkg/agent/agent.go
 @@ -53,6 +53,7 @@ type Agent struct {
@@ -24,7 +24,7 @@ index ea13b4b..78c4e41 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index 4e1a4f1..8e20793 100644
+index 4e1a4f13d..8e207938f 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
 @@ -293,6 +293,14 @@ const (
@@ -44,7 +44,7 @@ index 4e1a4f1..8e20793 100644
  func WithColdCacheClear(c *latest.ColdCacheClearConfig) Opt {
 diff --git a/pkg/config/latest/compaction_notes_test.go b/pkg/config/latest/compaction_notes_test.go
 new file mode 100644
-index 0000000..e7d2d47
+index 000000000..e7d2d47a8
 --- /dev/null
 +++ b/pkg/config/latest/compaction_notes_test.go
 @@ -0,0 +1,19 @@
@@ -68,10 +68,10 @@ index 0000000..e7d2d47
 +	assert.Equal(t, "/scratch/notes.md", cfg.Agents[0].CompactionNotes)
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index 3a4d0bb..ede38fa 100644
+index 8e78c05e8..5b006ed60 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
-@@ -793,6 +793,10 @@ type AgentConfig struct {
+@@ -790,6 +790,10 @@ type AgentConfig struct {
  	// first model request of a turn that starts after the prompt cache has
  	// expired. Absent, nothing is cleared. Added by Agentry's build.
  	ColdCacheClear *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`
@@ -83,10 +83,10 @@ index 3a4d0bb..ede38fa 100644
  	// the proactive threshold trigger and the post-overflow auto-recovery.
  	// Manual /compact stays available regardless. Pointer (tri-state) so
 diff --git a/pkg/modelerrors/modelerrors.go b/pkg/modelerrors/modelerrors.go
-index 2ac13e9..65a6bfa 100644
+index c7e073f97..960a92398 100644
 --- a/pkg/modelerrors/modelerrors.go
 +++ b/pkg/modelerrors/modelerrors.go
-@@ -153,6 +153,7 @@ var tokenOverflowPatterns = []string{
+@@ -157,6 +157,7 @@ var tokenOverflowPatterns = []string{
  	"context window exceeds limit",       // MiniMax
  	"model_context_window_exceeded",      // z.ai
  	"exceeds the available context size", // llama.cpp server (Docker Model Runner)
@@ -96,7 +96,7 @@ index 2ac13e9..65a6bfa 100644
  	"content length exceeds",
 diff --git a/pkg/modelerrors/overflow_window.go b/pkg/modelerrors/overflow_window.go
 new file mode 100644
-index 0000000..5532ce2
+index 000000000..5532ce2e7
 --- /dev/null
 +++ b/pkg/modelerrors/overflow_window.go
 @@ -0,0 +1,46 @@
@@ -148,7 +148,7 @@ index 0000000..5532ce2
 +}
 diff --git a/pkg/modelerrors/overflow_window_test.go b/pkg/modelerrors/overflow_window_test.go
 new file mode 100644
-index 0000000..4ea4817
+index 000000000..4ea4817e2
 --- /dev/null
 +++ b/pkg/modelerrors/overflow_window_test.go
 @@ -0,0 +1,50 @@
@@ -203,7 +203,7 @@ index 0000000..4ea4817
 +	assert.Zero(t, OverflowWindow(nil))
 +}
 diff --git a/pkg/runtime/loop_steps.go b/pkg/runtime/loop_steps.go
-index e7d2767..39bdecb 100644
+index e7d27678e..39bdecb2c 100644
 --- a/pkg/runtime/loop_steps.go
 +++ b/pkg/runtime/loop_steps.go
 @@ -194,7 +194,13 @@ func (r *LocalRuntime) handleStreamError(
@@ -223,7 +223,7 @@ index e7d2767..39bdecb 100644
  		}
 diff --git a/pkg/runtime/notes_reminder.go b/pkg/runtime/notes_reminder.go
 new file mode 100644
-index 0000000..d07c44a
+index 000000000..d07c44a84
 --- /dev/null
 +++ b/pkg/runtime/notes_reminder.go
 @@ -0,0 +1,26 @@
@@ -255,7 +255,7 @@ index 0000000..d07c44a
 +}
 diff --git a/pkg/runtime/notes_reminder_test.go b/pkg/runtime/notes_reminder_test.go
 new file mode 100644
-index 0000000..f8e95c5
+index 000000000..f8e95c5ba
 --- /dev/null
 +++ b/pkg/runtime/notes_reminder_test.go
 @@ -0,0 +1,69 @@
@@ -330,7 +330,7 @@ index 0000000..f8e95c5
 +}
 diff --git a/pkg/runtime/overflow_window.go b/pkg/runtime/overflow_window.go
 new file mode 100644
-index 0000000..69016e2
+index 000000000..69016e275
 --- /dev/null
 +++ b/pkg/runtime/overflow_window.go
 @@ -0,0 +1,74 @@
@@ -410,7 +410,7 @@ index 0000000..69016e2
 +}
 diff --git a/pkg/runtime/overflow_window_test.go b/pkg/runtime/overflow_window_test.go
 new file mode 100644
-index 0000000..99efc9d
+index 000000000..99efc9d82
 --- /dev/null
 +++ b/pkg/runtime/overflow_window_test.go
 @@ -0,0 +1,179 @@
@@ -594,10 +594,10 @@ index 0000000..99efc9d
 +	assert.False(t, retryWithSmallerEstimate(ctx, true, 0, 16_000, nil))
 +}
 diff --git a/pkg/runtime/session_compaction.go b/pkg/runtime/session_compaction.go
-index 74d2c69..c34bc6d 100644
+index 414cf5d61..e67d43b8f 100644
 --- a/pkg/runtime/session_compaction.go
 +++ b/pkg/runtime/session_compaction.go
-@@ -87,6 +87,16 @@ func (r *LocalRuntime) doCompact(ctx context.Context, sess *session.Session, a *
+@@ -88,6 +88,16 @@ func (r *LocalRuntime) doCompact(ctx context.Context, sess *session.Session, a *
  
  func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Session, a *agent.Agent, additionalPrompt, reason string, events EventSink) (result *compactor.Result) {
  	contextLimit, limitErr := r.compactionContextLimitChecked(ctx, a)
@@ -614,7 +614,7 @@ index 74d2c69..c34bc6d 100644
  
  	// before_compaction: hooks can veto or supply a custom summary.
  	pre := r.executeBeforeCompactionHooks(ctx, sess, a, reason, contextLimit, events)
-@@ -139,15 +149,23 @@ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Ses
+@@ -140,15 +150,23 @@ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Ses
  				outcome = CompactionOutcomeFailed
  				return nil
  			}
@@ -647,7 +647,7 @@ index 74d2c69..c34bc6d 100644
  		}
  		if errors.Is(err, errCompactionBudgetExceeded) {
  			outcome = CompactionOutcomeSkipped
-@@ -178,6 +196,10 @@ func (r *LocalRuntime) applyCompactionResult(ctx context.Context, sess *session.
+@@ -179,6 +197,10 @@ func (r *LocalRuntime) applyCompactionResult(ctx context.Context, sess *session.
  	// the new summary's estimated size.
  	preInputTokens, preOutputTokens := sess.Usage()
  
@@ -660,7 +660,7 @@ index 74d2c69..c34bc6d 100644
  	// while normal observed runs do; marking the emitted event as persisted
 diff --git a/pkg/runtime/stream_idle_option.go b/pkg/runtime/stream_idle_option.go
 new file mode 100644
-index 0000000..02839e3
+index 000000000..02839e3ad
 --- /dev/null
 +++ b/pkg/runtime/stream_idle_option.go
 @@ -0,0 +1,39 @@
@@ -705,7 +705,7 @@ index 0000000..02839e3
 +}
 diff --git a/pkg/runtime/stream_idle_option_test.go b/pkg/runtime/stream_idle_option_test.go
 new file mode 100644
-index 0000000..e5be8ab
+index 000000000..e5be8abc8
 --- /dev/null
 +++ b/pkg/runtime/stream_idle_option_test.go
 @@ -0,0 +1,52 @@
@@ -762,7 +762,7 @@ index 0000000..e5be8ab
 +	}
 +}
 diff --git a/pkg/runtime/streaming.go b/pkg/runtime/streaming.go
-index 93b2d21..a8f5e97 100644
+index 93b2d21aa..a8f5e973b 100644
 --- a/pkg/runtime/streaming.go
 +++ b/pkg/runtime/streaming.go
 @@ -36,10 +36,15 @@ const defaultStreamIdleTimeout = 5 * time.Minute
@@ -784,10 +784,10 @@ index 93b2d21..a8f5e97 100644
  		return flexStreamIdleTimeout
  	}
 diff --git a/pkg/teamloader/teamloader.go b/pkg/teamloader/teamloader.go
-index a7991dc..a5c2fed 100644
+index b88d17d18..d05a56c3e 100644
 --- a/pkg/teamloader/teamloader.go
 +++ b/pkg/teamloader/teamloader.go
-@@ -455,7 +455,8 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
+@@ -466,7 +466,8 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
  			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
  			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
  			agent.WithMaxToolResultTokens(agentConfig.MaxToolResultTokens),
