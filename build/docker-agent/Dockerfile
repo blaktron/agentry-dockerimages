@@ -57,9 +57,19 @@
 #      - the agent setting `compaction_notes: <path>` ends every compaction
 #        summary with one sentence pointing the agent at that notes file.
 #      Its tests run in the build.
+#   8. loop-nudge.patch, applied with no fuzz after both, stops the loop
+#      detector from ending a run. When the model makes the same tool call with
+#      the same arguments max_consecutive_tool_calls times in a row (default
+#      5), an implicit user message is added after the call's results. It
+#      names the tool and the count, never the arguments, and tells the agent
+#      to reach the goal another way, or to say why it cannot and move on or
+#      end the run; the detector resets, and every later streak gets the
+#      message again with the count of earlier ones. Each nudge is a Warning
+#      event starting "Loop nudge". The run's own limits still apply. Its
+#      tests run in the build.
 #
 # The patches' files carry a note that Agentry's build adds or changes them, and
-# the image keeps both patches at /usr/share/doc/docker-agent/.
+# the image keeps the three patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -82,11 +92,12 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
-COPY --from=agentry cold-cache-clear.patch long-runs.patch /agentry/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch /agentry/
 # --fuzz=0: a hunk that no longer matches exactly fails the build rather than
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/long-runs.patch
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/loop-nudge.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 && \
 	go mod verify
@@ -109,6 +120,16 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LongRun' \
 	./pkg/modelerrors ./pkg/runtime ./pkg/config/latest
+# loop-nudge.patch's tests: a streak nudges the agent and the run goes on, the
+# next request ends with the nudge after the call's result, every streak is
+# nudged again with the count, the agent can still end the run, a run that
+# never repeats is unchanged, polling tools stay exempt, the nudge names the
+# tool and the count but never the arguments, and the upstream tests that
+# expected a streak to end the run now expect the nudge.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection' \
+	./pkg/runtime
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
@@ -133,7 +154,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
-COPY --from=agentry cold-cache-clear.patch long-runs.patch /usr/share/doc/docker-agent/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -141,4 +162,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear and long-runs patches, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs and loop-nudge patches, for the QuickAgent runtime's default harness"
