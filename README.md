@@ -64,13 +64,13 @@ Mirrors used only as bases when building:
 |---|---|---|
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
 | `agentry-harness-alpine` | `alpine:3.24` | `build/docker-agent/` and `build/gog/`: runtime base. |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
+| `agentry-harness-golang` | `golang:1.27.4-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
 | `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
 | `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
 | `agentry-node-trixie` | `node:26-trixie-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
-| `agentry-golang-trixie` | `golang:1.27.3-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
+| `agentry-golang-trixie` | `golang:1.27.4-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
 
 Packages that the publishing workflows create in this public repository are
 public, so the images a run pulls need no registry login. The build-time
@@ -444,7 +444,7 @@ mounts are the runner's settings. It holds:
   `python3-venv` and `python3-dev`, and `unzip`, `zip`, `xz-utils`, `bzip2`,
   `patch`, `file`, `jq`, `procps` and `less` (`PACKAGES` in `source.env`);
 - Go, the Go project's release, in `/usr/local/go`, from the
-  `golang:1.27.3-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
+  `golang:1.27.4-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
   asks for a newer Go fails instead of downloading a toolchain;
 - Node 26 and npm, from the `node:26-trixie-slim` mirror;
 - in `/usr/local/bin`, five release binaries, each its project's static
