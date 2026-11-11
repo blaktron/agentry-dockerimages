@@ -67,16 +67,26 @@
 #      message again with the count of earlier ones. Each nudge is a Warning
 #      event starting "Loop nudge". The run's own limits still apply. Its
 #      tests run in the build.
+#   9. length-recovery.patch, applied with no fuzz after the three, adds the
+#      agent setting `length_recovery: true`. An answer the output limit cut
+#      off no longer ends the run: the cut text, its reasoning and any tool
+#      call streamed into it leave the conversation, a one-line stub takes
+#      their place, and an implicit user message after it says what was cut
+#      and asks for one concrete step or a short final answer, or for the cut
+#      call again with complete arguments. A cut call is never run. At most two
+#      a run; the third cut answer ends the run as upstream. Each recovery is a
+#      Warning event starting "Length recovery". Without the setting, a cut
+#      answer ends the run as upstream. Its tests run in the build.
 #
 # The patches' files carry a note that Agentry's build adds or changes them, and
-# the image keeps the three patches at /usr/share/doc/docker-agent/.
+# the image keeps the four patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
 # image, still apply. A run needs neither docker-cli nor the docker-mcp plugin;
 # removing them changes behaviour and needs a live run to confirm.
 
-ARG GO_IMAGE=golang:1.27.3-alpine3.24
+ARG GO_IMAGE=golang:1.27.4-alpine3.24
 ARG ALPINE_IMAGE=alpine:3.24
 ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 
@@ -92,12 +102,13 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch /agentry/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch /agentry/
 # --fuzz=0: a hunk that no longer matches exactly fails the build rather than
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/long-runs.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/loop-nudge.patch
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/length-recovery.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 && \
 	go mod verify
@@ -130,6 +141,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection' \
 	./pkg/runtime
+# length-recovery.patch's tests: a cut answer, a cut call and reasoning until
+# the limit leave the conversation and the run goes on, the next request ends
+# with the instruction after the stub and carries none of the cut text, a cut
+# call is never run, the third cut ends the run as upstream, a run with no cut
+# is unchanged, and the setting off is upstream.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'LengthRecovery' \
+	./pkg/runtime ./pkg/config/latest
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
@@ -154,7 +174,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch /usr/share/doc/docker-agent/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -162,4 +182,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs and loop-nudge patches, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs, loop-nudge and length-recovery patches, for the QuickAgent runtime's default harness"

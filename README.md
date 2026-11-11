@@ -55,7 +55,7 @@ list. Built images are listed with what they are built from.
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear, long-runs and loop-nudge patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear, long-runs, loop-nudge and length-recovery patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -64,13 +64,13 @@ Mirrors used only as bases when building:
 |---|---|---|
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | `build/docker-agent/`: the `docker-mcp` CLI plugin is copied from this digest. |
 | `agentry-harness-alpine` | `alpine:3.24` | `build/docker-agent/` and `build/gog/`: runtime base. |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
+| `agentry-harness-golang` | `golang:1.27.4-alpine3.24` | `build/docker-agent/` and `build/gog/`: compiler. |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | `build/agentry-unsafe-kali/`: base. |
 | `agentry-rust-alpine` | `rust:1.99.1-alpine3.24` | `build/typst/` and `build/ripgrep/`: compiler, on the same Alpine as the runner image. |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign` | `build/agentry-codex/`: verifies OpenAI's signature on the Codex binary. |
 | `agentry-debian` | `debian:trixie-slim` | `build/agentry-browser/` and `build/agentry-coder/`: base. |
 | `agentry-node-trixie` | `node:26-trixie-slim` | `build/agentry-browser/`: installs `@playwright/mcp` from its lockfile and supplies the image's `node`. `build/agentry-coder/`: supplies `node` and npm. |
-| `agentry-golang-trixie` | `golang:1.27.3-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
+| `agentry-golang-trixie` | `golang:1.27.4-trixie` | `build/agentry-coder/`: supplies `/usr/local/go`. |
 
 Packages that the publishing workflows create in this public repository are
 public, so the images a run pulls need no registry login. The build-time
@@ -444,7 +444,7 @@ mounts are the runner's settings. It holds:
   `python3-venv` and `python3-dev`, and `unzip`, `zip`, `xz-utils`, `bzip2`,
   `patch`, `file`, `jq`, `procps` and `less` (`PACKAGES` in `source.env`);
 - Go, the Go project's release, in `/usr/local/go`, from the
-  `golang:1.27.3-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
+  `golang:1.27.4-trixie` mirror, with `GOTOOLCHAIN=local`, so a module that
   asks for a newer Go fails instead of downloading a toolchain;
 - Node 26 and npm, from the `node:26-trixie-slim` mirror;
 - in `/usr/local/bin`, five release binaries, each its project's static
@@ -497,8 +497,9 @@ from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
 linked; otel's `otlptracegrpc` exporter is raised to the release that fixes the
-advisory reported against upstream's pin; and it carries three patches,
-`cold-cache-clear.patch`, then `long-runs.patch`, then `loop-nudge.patch`.
+advisory reported against upstream's pin; and it carries four patches,
+`cold-cache-clear.patch`, then `long-runs.patch`, then `loop-nudge.patch`,
+then `length-recovery.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that
@@ -592,16 +593,48 @@ stops repeating. Upstream's `TestRunStream_RepeatedDatetimeReads` and
 termination; the patch rewrites them to expect the nudge. The image keeps
 `loop-nudge.patch` beside the other two.
 
+`length-recovery.patch` keeps a run going after an answer the output limit
+(`max_tokens`) cut off. Upstream ends the run on such an answer: `run --exec`
+reports "agent answer was truncated by the token limit", the cut text stays in
+the session, and a tool call streamed into the cut turn is dropped. A local
+model that falls into repetition, or reasons until the limit, loses the whole
+run that way, and a resumed session sends the degenerate text back to it. The
+patch adds one agent setting, `length_recovery: true`. With it, a cut-off turn
+with no tool call left to run:
+
+- leaves the conversation: the stored assistant message becomes a one-line
+  stub saying what was cut (an answer and its length, reasoning with no reply,
+  or a call to a named tool), and its reasoning, signatures and the provider's
+  raw response go with the text;
+- is followed by an implicit user message, starting "Note from the agent
+  runtime, not the user", that says what happened and asks for one concrete
+  step or a short final answer, or, for a cut call, for the call again with
+  complete arguments, split into smaller calls if they are long;
+- lets the run go on.
+
+A cut call is never run, as upstream already ensures, since its arguments may
+be incomplete. A run recovers at most twice; the second message says that
+another cut-off answer will end the run, and the third ends it as upstream
+does. Each recovery is a `Warning` event whose message starts `Length recovery
+<n>:`, and a log line, so a caller can count them. The message names a tool
+only when its name has the shape upstream accepts and never quotes the cut
+text. Without the setting a cut answer ends the run as upstream. The setting
+is not in `agent-schema.json` either, so `TestSchemaMatchesGoTypes` also names
+`length_recovery`. The image keeps `length-recovery.patch` beside the other
+three.
+
 **Re-porting the patches on a commit bump.** Apply them in order to the new
 commit (`git apply --3way build/docker-agent/cold-cache-clear.patch`, commit,
 then `git apply --3way build/docker-agent/long-runs.patch`, commit, then
-`git apply --3way build/docker-agent/loop-nudge.patch`, in a clone at
+`git apply --3way build/docker-agent/loop-nudge.patch`, commit, then
+`git apply --3way build/docker-agent/length-recovery.patch`, in a clone at
 `UPSTREAM_COMMIT`), resolve what no longer matches, and run their tests there:
 `go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
 ./pkg/runtime ./pkg/config/latest`, `go test -tags no_audio -run 'LongRun'
 ./pkg/modelerrors ./pkg/runtime ./pkg/config/latest` and `go test -tags
 no_audio -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection'
-./pkg/runtime`. The first patch's hooks
+./pkg/runtime` and `go test -tags no_audio -run 'LengthRecovery' ./pkg/runtime
+./pkg/config/latest`. The first patch's hooks
 are the session's two history assemblies (`getMessages` and
 `CompactionInput`), the run loop's first model request (`runStreamLoop`,
 before its loop), the agent config's latest schema and the teamloader's agent
@@ -609,10 +642,14 @@ options. The second's are the overflow matcher's token patterns, the overflow
 branch of `handleStreamError`, `generateCompaction`'s context limit,
 `applyCompactionResult`, `streamIdleTimeoutFor` and the same config and
 teamloader points. The third's are the loop-detected branch of `runTurn` and
-the `loopState` struct. Write each back with `git diff` against the tree before it
-(`cold-cache-clear.patch` against upstream, `long-runs.patch` against the
-first patch's commit, `loop-nudge.patch` against the second's). The build
-applies all three with `patch --fuzz=0`, so a hunk
+the `loopState` struct. The fourth's are the length branch of
+`handleStream`'s terminal chunk and `streamResult`, `runTurn` after the stream
+is processed and after the usage event, `loopState`, and the same config and
+teamloader points. Write each back with `git diff --abbrev=9` against the tree
+before it (`cold-cache-clear.patch` against upstream, `long-runs.patch` against
+the first patch's commit, `loop-nudge.patch` against the second's,
+`length-recovery.patch` against the third's). The build
+applies all four with `patch --fuzz=0`, so a hunk
 that moved fails the build rather than landing nearby, and runs their tests
 before the binary is built; `scripts/check.sh` fails if any patch, its
 application or its tests leave the Dockerfile.
