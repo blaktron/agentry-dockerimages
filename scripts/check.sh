@@ -76,7 +76,7 @@
 #     level error with the audit log off, strip setuid and setgid bits and
 #     run as ms365; or the keeper, the generator's lockfile, the allow-lists
 #     or the MCP probe is missing (build/ms365).
-#   - either of the docker-agent build's patches is missing, empty, not
+#   - any of the docker-agent build's patches is missing, empty, not
 #     applied with no fuzz by its Dockerfile, its tests not run there, or not
 #     named in source.env (build/docker-agent).
 #
@@ -146,8 +146,8 @@
 #       root, `docker-agent version` names source.env's tag and commit,
 #       DOCKER_AGENT_DISABLE_DESKTOP_PROXY is 1, no file is setuid or setgid,
 #       the binary is static, it carries the cold-cache clear, the
-#       long-runs changes and the loop nudge and the image keeps the three
-#       patches, and it links
+#       long-runs changes, the loop nudge and the length recovery and the
+#       image keeps the four patches, and it links
 #       golang.org/x/net v0.62.0 or later.
 #       PLATFORM asks for, and checks, one architecture.
 #   scripts/check.sh --hostlink-image <ref>
@@ -1313,6 +1313,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name loop-nudge.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/length-recovery.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/length-recovery.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*length-recovery\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply length-recovery.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'LengthRecovery'" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run length-recovery.patch's tests"
+		bad=1
+	elif ! grep -q 'length-recovery\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name length-recovery.patch"
+		bad=1
+	fi
 	return "$bad"
 }
 
@@ -1412,8 +1425,16 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the loop nudge (loop-nudge.patch)"
 		bad=1
 	fi
+	# The setting's name and a phrase of the recovery's warning
+	# (length-recovery.patch); change them with it.
+	if grep -aq 'length_recovery' "$out/docker-agent" && grep -aq 'an answer cut off at the output limit (' "$out/docker-agent"; then
+		echo "ok   the binary carries the length recovery"
+	else
+		echo "FAIL the binary does not carry the length recovery (length-recovery.patch)"
+		bad=1
+	fi
 	local patch
-	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch; do
+	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch; do
 		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
 			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
 		else
