@@ -76,7 +76,7 @@
 # image, still apply. A run needs neither docker-cli nor the docker-mcp plugin;
 # removing them changes behaviour and needs a live run to confirm.
 
-ARG GO_IMAGE=golang:1.27.3-alpine3.24
+ARG GO_IMAGE=golang:1.27.4-alpine3.24
 ARG ALPINE_IMAGE=alpine:3.24
 ARG GATEWAY_IMAGE=docker/mcp-gateway:v2
 

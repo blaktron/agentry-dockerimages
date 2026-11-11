@@ -194,7 +194,7 @@ naming them — see each upstream repository.
 | `agentry-docker-agent` | `docker/docker-agent:1.159.0` | Apache-2.0 |
 | `agentry-mcp-gateway-v2` | `docker/mcp-gateway:v2` | see upstream |
 | `agentry-golang-alpine` | `golang:1.27-alpine` | see upstream (Go: BSD-3; Alpine: MIT) |
-| `agentry-harness-golang` | `golang:1.27.3-alpine3.24` | see upstream (Go: BSD-3; Alpine: MIT) |
+| `agentry-harness-golang` | `golang:1.27.4-alpine3.24` | see upstream (Go: BSD-3; Alpine: MIT) |
 | `agentry-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
 | `agentry-harness-alpine` | `alpine:3.24` | see upstream (Alpine Linux) |
 | `agentry-node-alpine` | `node:22-alpine` | see upstream (Node.js: MIT) |
@@ -205,7 +205,7 @@ naming them — see each upstream repository.
 | `agentry-python-slim` | `python:3.15-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
 | `agentry-python-slim` | `python:3.14-slim-trixie` | see upstream (Python: PSF; Debian trixie packages, each under its own licence) |
 | `agentry-node-trixie` | `node:26-trixie-slim` | see upstream (Node.js: MIT; Debian trixie packages, each under its own licence) |
-| `agentry-golang-trixie` | `golang:1.27.3-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
+| `agentry-golang-trixie` | `golang:1.27.4-trixie` | see upstream (Go: BSD-3; Debian trixie packages, each under its own licence) |
 | `agentry-debian` | `debian:trixie-slim` | see upstream (Debian trixie packages, each under its own licence) |
 | `agentry-cosign` | `ghcr.io/sigstore/cosign/cosign:v3.1.4` | see upstream (cosign: Apache-2.0) |
 | `agentry-kali-rolling` | `kalilinux/kali-rolling` | see upstream (Kali Linux; its packages' own licences) |
@@ -428,8 +428,8 @@ The Coding agent's toolchain image. What is in it, and under which terms:
   `build/agentry-coder/source.env`; their names and versions are recorded in
   `/etc/agentry/coder/packages`. Their source is in Debian's archive (see
   "Source of the GPL and LGPL packages").
-- **Go** 1.27.3, the Go project's release (https://go.dev/), the tree
-  `/usr/local/go` taken unchanged from the `golang:1.27.3-trixie` mirror:
+- **Go** 1.27.4, the Go project's release (https://go.dev/), the tree
+  `/usr/local/go` taken unchanged from the `golang:1.27.4-trixie` mirror:
   BSD-3-Clause, with Go's `LICENSE` and `PATENTS` at
   `/usr/share/licenses/agentry-coder/go/`.
 - **Node.js** 26, the file `/usr/local/bin/node`, and **npm**, the folder
