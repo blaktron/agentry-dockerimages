@@ -85,6 +85,12 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    `pkg/runtime/background_compaction.go`, each marked where it changes them,
    and adds two files of its own under `pkg/runtime`, each headed as not part
    of upstream. The image keeps it beside the other four.
+11. `build/docker-agent/acp-usage.patch` is applied after the five. A
+   prompt's ACP `usage_update` is sent whatever the model's window, with
+   `size` 0 when it is unknown. It changes `pkg/acp/agent.go` and
+   `pkg/acp/usage_test.go`, each marked where it changes them, and adds two
+   files of its own under `pkg/acp`, each headed as not part of upstream. The
+   image keeps it beside the other five.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the

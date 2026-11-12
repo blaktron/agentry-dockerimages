@@ -1,0 +1,138 @@
+diff --git a/pkg/acp/agent.go b/pkg/acp/agent.go
+index cdb583f52..fafad4907 100644
+--- a/pkg/acp/agent.go
++++ b/pkg/acp/agent.go
+@@ -922,7 +922,10 @@ func (a *Agent) runAgent(ctx context.Context, acpSess *Session) (stopReason acp.
+ 
+ 		case *runtime.TokenUsageEvent:
+ 			if usage != nil {
+-				if err := a.emitUsage(ctx, acpSess.id, usage); err != nil {
++				// Sent whatever the window, size 0 when it is unknown, so a
++				// client can count a session's tokens on any model (changed
++				// by Agentry's build).
++				if err := a.emitTurnUsage(ctx, acpSess.id, usage); err != nil {
+ 					return "", err
+ 				}
+ 			}
+diff --git a/pkg/acp/turnusage.go b/pkg/acp/turnusage.go
+new file mode 100644
+index 000000000..0073e122c
+--- /dev/null
++++ b/pkg/acp/turnusage.go
+@@ -0,0 +1,31 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (acp-usage.patch in github.com/blaktron/agentry-dockerimages).
++
++package acp
++
++import (
++	"context"
++
++	acp "github.com/coder/acp-go-sdk"
++
++	"github.com/docker/docker-agent/pkg/runtime"
++)
++
++// emitTurnUsage is the usage_update a prompt's token usage event becomes.
++// Unlike emitUsage, which the /usage command shares and which sends nothing
++// for a model of unknown window, it is sent whatever the window: `used` is
++// the session's tokens either way, and `size` is 0 when the window is not
++// known, so a client counting a session's tokens is not left with none.
++func (a *Agent) emitTurnUsage(ctx context.Context, sid string, usage *runtime.Usage) error {
++	if usage == nil || usage.ContextLimit < 0 {
++		return nil
++	}
++	if usage.ContextLimit > 0 {
++		return a.emitUsage(ctx, sid, usage)
++	}
++	update := acp.SessionUsageUpdate{SessionUpdate: "usage_update", Size: 0, Used: int(usage.ContextLength)}
++	if usage.Cost > 0 {
++		update.Cost = &acp.Cost{Amount: usage.Cost, Currency: "USD"}
++	}
++	return a.sendUpdate(ctx, sid, acp.SessionUpdate{UsageUpdate: &update})
++}
+diff --git a/pkg/acp/turnusage_test.go b/pkg/acp/turnusage_test.go
+new file mode 100644
+index 000000000..38696305d
+--- /dev/null
++++ b/pkg/acp/turnusage_test.go
+@@ -0,0 +1,51 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (acp-usage.patch in github.com/blaktron/agentry-dockerimages).
++
++package acp
++
++import (
++	"testing"
++	"testing/synctest"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/runtime"
++)
++
++func TestTurnUsageWithoutAWindow(t *testing.T) {
++	t.Parallel()
++	synctest.Test(t, func(t *testing.T) {
++		rt := &fakeRuntime{events: []runtime.Event{
++			runtime.NewTokenUsageEvent(testSessionID, "root", &runtime.Usage{ContextLength: 4321, Cost: 0.25}),
++		}}
++		f := newRunAgentFixture(t, rt, &captureWriter{})
++		require.NoError(t, f.runAgent(t.Context(), f.sess))
++
++		updates := f.sessionUpdates(t)
++		require.Len(t, updates, 2)
++		require.NotNil(t, updates[1].UsageUpdate)
++		assert.Equal(t, 0, updates[1].UsageUpdate.Size, "an unknown window is size 0")
++		assert.Equal(t, 4321, updates[1].UsageUpdate.Used)
++		require.NotNil(t, updates[1].UsageUpdate.Cost)
++		assert.InDelta(t, 0.25, updates[1].UsageUpdate.Cost.Amount, 1e-9)
++	})
++}
++
++func TestTurnUsageWithAWindowIsUnchanged(t *testing.T) {
++	t.Parallel()
++	synctest.Test(t, func(t *testing.T) {
++		rt := &fakeRuntime{events: []runtime.Event{
++			runtime.NewTokenUsageEvent(testSessionID, "root", &runtime.Usage{ContextLength: 42, ContextLimit: 1000}),
++		}}
++		f := newRunAgentFixture(t, rt, &captureWriter{})
++		require.NoError(t, f.runAgent(t.Context(), f.sess))
++
++		updates := f.sessionUpdates(t)
++		require.Len(t, updates, 2)
++		require.NotNil(t, updates[1].UsageUpdate)
++		assert.Equal(t, 1000, updates[1].UsageUpdate.Size)
++		assert.Equal(t, 42, updates[1].UsageUpdate.Used)
++		assert.Nil(t, updates[1].UsageUpdate.Cost)
++	})
++}
+diff --git a/pkg/acp/usage_test.go b/pkg/acp/usage_test.go
+index 65af14c56..080279692 100644
+--- a/pkg/acp/usage_test.go
++++ b/pkg/acp/usage_test.go
+@@ -93,12 +93,21 @@ func TestUsageUnknownAndInvalidSnapshots(t *testing.T) {
+ 	}}, &captureWriter{})
+ 	require.NoError(t, f.runAgent(t.Context(), f.sess))
+ 	updates := usageUpdates(t, f.out)
+-	require.Len(t, updates, 3)
+-	for _, update := range updates {
++	// Before the root's window is known its usage still goes out, with size 0
++	// (changed by Agentry's build: upstream sends nothing until a window is
++	// known).
++	require.Len(t, updates, 5)
++	for i, update := range updates {
+ 		assert.Equal(t, 20, update.Used)
++		if i < 2 {
++			assert.Equal(t, 0, update.Size)
++			continue
++		}
+ 		assert.Equal(t, 1000, update.Size)
+ 		assert.InDelta(t, 0.4, update.Cost.Amount, 1e-9)
+ 	}
++	assert.InDelta(t, 0.3, updates[0].Cost.Amount, 1e-9)
++	assert.InDelta(t, 0.4, updates[1].Cost.Amount, 1e-9)
+ 	assert.Nil(t, f.sess.recordUsage(nil))
+ 	assert.Nil(t, f.sess.recordUsage(usageEvent(testSessionID, "root", -1, 1000, 0.1)))
+ 	s := &Session{sess: session.New()}
