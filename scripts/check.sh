@@ -1339,6 +1339,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name compaction-reason.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/acp-usage.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/acp-usage.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*acp-usage\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply acp-usage.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'TurnUsage" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run acp-usage.patch's tests"
+		bad=1
+	elif ! grep -q 'acp-usage\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name acp-usage.patch"
+		bad=1
+	fi
 	return "$bad"
 }
 
@@ -1454,8 +1467,15 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the compaction reason (compaction-reason.patch)"
 		bad=1
 	fi
+	# The patch's own function (acp-usage.patch); change it with it.
+	if grep -aq 'emitTurnUsage' "$out/docker-agent"; then
+		echo "ok   the binary carries the session usage without a window"
+	else
+		echo "FAIL the binary does not carry the session usage without a window (acp-usage.patch)"
+		bad=1
+	fi
 	local patch
-	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch; do
+	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch; do
 		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
 			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
 		else
