@@ -55,7 +55,7 @@ list. Built images are listed with what they are built from.
 | `agentry-coder` | `debian:trixie-slim` + Debian's build tools and Python + Go + Node + the git hosts' CLIs and two scanners (`build/agentry-coder/`) | build | The Coding agent's toolchain, the image its exec container is built from, amd64 and arm64. |
 | `agentry-gog` | gog built from source (`build/gog/`) | build | The Google Workspace MCP server (`gog mcp`), amd64 and arm64, signed. |
 | `agentry-ms365` | Softeria's ms-365-mcp-server built from source (`build/ms365/`) | build | The Microsoft 365 and Outlook.com MCP server, its token cache sealed under a key the runner gives it, amd64 and arm64, signed. |
-| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear, long-runs, loop-nudge and length-recovery patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
+| `agentry-docker-agent-src` | `docker/docker-agent` built from source (`build/docker-agent/`) | build | The default harness: Docker Agent built from a pinned commit with its cold-cache clear, long-runs, loop-nudge, length-recovery and compaction-reason patches, amd64 and arm64, signed. Published beside the mirror so the two can be compared. |
 | `agentry-minio` | `cgr.dev/chainguard/minio:latest` | mirror | The object store of the core's headless compose stack: MinIO, AGPL-3.0 (see `NOTICE` for its source). Not used by a run. |
 
 Mirrors used only as bases when building:
@@ -497,9 +497,9 @@ from a pinned digest instead of the floating `docker/mcp-gateway:v2`;
 `DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1` is set; it builds Linux only, without
 upstream's cross-compilation stages, with the binary checked to be statically
 linked; otel's `otlptracegrpc` exporter is raised to the release that fixes the
-advisory reported against upstream's pin; and it carries four patches,
+advisory reported against upstream's pin; and it carries five patches,
 `cold-cache-clear.patch`, then `long-runs.patch`, then `loop-nudge.patch`,
-then `length-recovery.patch`.
+then `length-recovery.patch`, then `compaction-reason.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
 keep_browser, browser_tools}`. On the first model request of a turn that
@@ -623,18 +623,33 @@ is not in `agent-schema.json` either, so `TestSchemaMatchesGoTypes` also names
 `length_recovery`. The image keeps `length-recovery.patch` beside the other
 three.
 
+`compaction-reason.patch` says why a compaction ran. Under `run --exec --json`
+upstream reports a compaction as `session_compaction` events, `started` and
+then `completed` with an `outcome` (`applied`, `skipped` or `failed`), and
+passes the reason only to its compaction hooks. The patch adds `reason` to the
+`completed` event of every compaction the runtime attempted: `threshold` when
+the conversation neared the model's window (the default path and the
+background one), `overflow` when the model's server refused the request as too
+long, `manual` for `/compact`. A completion emitted before any attempt (a
+manual compaction with nothing to compact) has none, and the `started` event
+never does. Nothing else in the event changes, so a caller that ignores the
+field sees upstream's events. The image keeps `compaction-reason.patch` beside
+the other four.
+
 **Re-porting the patches on a commit bump.** Apply them in order to the new
 commit (`git apply --3way build/docker-agent/cold-cache-clear.patch`, commit,
 then `git apply --3way build/docker-agent/long-runs.patch`, commit, then
 `git apply --3way build/docker-agent/loop-nudge.patch`, commit, then
-`git apply --3way build/docker-agent/length-recovery.patch`, in a clone at
+`git apply --3way build/docker-agent/length-recovery.patch`, commit, then
+`git apply --3way build/docker-agent/compaction-reason.patch`, in a clone at
 `UPSTREAM_COMMIT`), resolve what no longer matches, and run their tests there:
 `go test -tags no_audio -run 'ColdC|LastResponseAt' ./pkg/session
 ./pkg/runtime ./pkg/config/latest`, `go test -tags no_audio -run 'LongRun'
 ./pkg/modelerrors ./pkg/runtime ./pkg/config/latest` and `go test -tags
 no_audio -run 'LoopNudge|RepeatedDatetimeReads|FailedRandomDrawsTriggerLoopDetection'
-./pkg/runtime` and `go test -tags no_audio -run 'LengthRecovery' ./pkg/runtime
-./pkg/config/latest`. The first patch's hooks
+./pkg/runtime`, `go test -tags no_audio -run 'LengthRecovery' ./pkg/runtime
+./pkg/config/latest` and `go test -tags no_audio -run 'CompactionReason'
+./pkg/runtime`. The first patch's hooks
 are the session's two history assemblies (`getMessages` and
 `CompactionInput`), the run loop's first model request (`runStreamLoop`,
 before its loop), the agent config's latest schema and the teamloader's agent
@@ -645,11 +660,15 @@ teamloader points. The third's are the loop-detected branch of `runTurn` and
 the `loopState` struct. The fourth's are the length branch of
 `handleStream`'s terminal chunk and `streamResult`, `runTurn` after the stream
 is processed and after the usage event, `loopState`, and the same config and
-teamloader points. Write each back with `git diff --abbrev=9` against the tree
+teamloader points. The fifth's are `SessionCompactionEvent` and the four
+emitters of a `completed` event for an attempted compaction: `doCompact`,
+`generateCompaction`'s deferred completion, and the background job's stop and
+apply. Write each back with `git diff --abbrev=9` against the tree
 before it (`cold-cache-clear.patch` against upstream, `long-runs.patch` against
 the first patch's commit, `loop-nudge.patch` against the second's,
-`length-recovery.patch` against the third's). The build
-applies all four with `patch --fuzz=0`, so a hunk
+`length-recovery.patch` against the third's, `compaction-reason.patch` against
+the fourth's). The build
+applies all five with `patch --fuzz=0`, so a hunk
 that moved fails the build rather than landing nearby, and runs their tests
 before the binary is built; `scripts/check.sh` fails if any patch, its
 application or its tests leave the Dockerfile.

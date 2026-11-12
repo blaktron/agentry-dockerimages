@@ -77,9 +77,15 @@
 #      a run; the third cut answer ends the run as upstream. Each recovery is a
 #      Warning event starting "Length recovery". Without the setting, a cut
 #      answer ends the run as upstream. Its tests run in the build.
+#  10. compaction-reason.patch, applied with no fuzz after the four, adds
+#      `reason` ("threshold", "overflow" or "manual") to the "completed"
+#      session_compaction event of a compaction the runtime attempted, so a
+#      caller of `run --exec --json` can tell a compaction the window's
+#      threshold started from one a refused request forced. The event is
+#      otherwise unchanged. Its tests run in the build.
 #
 # The patches' files carry a note that Agentry's build adds or changes them, and
-# the image keeps the four patches at /usr/share/doc/docker-agent/.
+# the image keeps the five patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -102,13 +108,14 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch /agentry/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch /agentry/
 # --fuzz=0: a hunk that no longer matches exactly fails the build rather than
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/long-runs.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/loop-nudge.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/length-recovery.patch
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/compaction-reason.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 && \
 	go mod verify
@@ -150,6 +157,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'LengthRecovery' \
 	./pkg/runtime ./pkg/config/latest
+# compaction-reason.patch's tests: a threshold, an overflow and a manual
+# compaction each complete with their reason, a skipped one too, the started
+# event carries none, and a background compaction completes as a threshold one.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'CompactionReason' \
+	./pkg/runtime
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
@@ -174,7 +188,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch /usr/share/doc/docker-agent/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -182,4 +196,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs, loop-nudge and length-recovery patches, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs, loop-nudge, length-recovery and compaction-reason patches, for the QuickAgent runtime's default harness"

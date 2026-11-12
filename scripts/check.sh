@@ -1326,6 +1326,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name length-recovery.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/compaction-reason.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/compaction-reason.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*compaction-reason\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply compaction-reason.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'CompactionReason'" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run compaction-reason.patch's tests"
+		bad=1
+	elif ! grep -q 'compaction-reason\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name compaction-reason.patch"
+		bad=1
+	fi
 	return "$bad"
 }
 
@@ -1433,8 +1446,16 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the length recovery (length-recovery.patch)"
 		bad=1
 	fi
+	# The patch's own function, whose name the binary keeps however it is
+	# stripped (compaction-reason.patch); change it with it.
+	if grep -aq 'sessionCompactionCompletedFor' "$out/docker-agent"; then
+		echo "ok   the binary carries the compaction reason"
+	else
+		echo "FAIL the binary does not carry the compaction reason (compaction-reason.patch)"
+		bad=1
+	fi
 	local patch
-	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch; do
+	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch; do
 		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
 			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
 		else
