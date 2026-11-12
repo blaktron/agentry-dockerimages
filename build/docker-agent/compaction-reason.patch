@@ -1,0 +1,195 @@
+diff --git a/pkg/runtime/background_compaction.go b/pkg/runtime/background_compaction.go
+index fffe1d83a..17ad9a454 100644
+--- a/pkg/runtime/background_compaction.go
++++ b/pkg/runtime/background_compaction.go
+@@ -49,7 +49,8 @@ func (b *backgroundCompaction) stop(events EventSink) {
+ 	<-b.done
+ 	b.flush(events)
+ 	if b.result != nil {
+-		events.Emit(SessionCompactionCompleted(b.snapshot.ID, CompactionOutcomeSkipped, b.agent.Name()))
++		// The completed event says why the compaction ran (added by Agentry's build).
++		events.Emit(sessionCompactionCompletedFor(b.snapshot.ID, CompactionOutcomeSkipped, b.agent.Name(), compactionReasonThreshold))
+ 	}
+ 	b.done = nil
+ 	if b.release != nil {
+@@ -124,7 +125,8 @@ func (b *backgroundCompaction) poll(ctx context.Context, r *LocalRuntime, sess *
+ 		limit := r.effectiveContextLimit(ctx, b.agent, r.resolveContextLimit(ctx, b.agent.Model(ctx), modelID))
+ 		events.Emit(NewTokenUsageEvent(sess.ID, b.agent.Name(), SessionUsage(sess, limit, b.agent.CompactionThreshold())))
+ 	}
+-	events.Emit(SessionCompactionCompleted(sess.ID, outcome, b.agent.Name()))
++	// The completed event says why the compaction ran (added by Agentry's build).
++	events.Emit(sessionCompactionCompletedFor(sess.ID, outcome, b.agent.Name(), compactionReasonThreshold))
+ 	b.result = nil
+ }
+ 
+diff --git a/pkg/runtime/compactionreason.go b/pkg/runtime/compactionreason.go
+new file mode 100644
+index 000000000..9a62e2761
+--- /dev/null
++++ b/pkg/runtime/compactionreason.go
+@@ -0,0 +1,14 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (compaction-reason.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++// sessionCompactionCompletedFor is the "completed" event of a compaction
++// the runtime attempted for reason ("threshold", "overflow" or "manual"), so
++// a consumer of the event stream can tell a compaction the window's
++// threshold started from one a refused request forced.
++func sessionCompactionCompletedFor(sessionID, outcome, agentName, reason string) Event {
++	e := SessionCompactionCompleted(sessionID, outcome, agentName).(*SessionCompactionEvent)
++	e.Reason = reason
++	return e
++}
+diff --git a/pkg/runtime/compactionreason_test.go b/pkg/runtime/compactionreason_test.go
+new file mode 100644
+index 000000000..547bf2ab3
+--- /dev/null
++++ b/pkg/runtime/compactionreason_test.go
+@@ -0,0 +1,105 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (compaction-reason.patch in github.com/blaktron/agentry-dockerimages).
++
++package runtime
++
++import (
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/agent"
++	"github.com/docker/docker-agent/pkg/chat"
++	"github.com/docker/docker-agent/pkg/team"
++	"github.com/docker/docker-agent/pkg/userconfig"
++)
++
++// completedCompactions is the "completed" compaction events among events.
++func completedCompactions(events []Event) []*SessionCompactionEvent {
++	var out []*SessionCompactionEvent
++	for _, ev := range events {
++		if e, ok := ev.(*SessionCompactionEvent); ok && e.Status == "completed" {
++			out = append(out, e)
++		}
++	}
++	return out
++}
++
++func TestCompactionReasonOnTheCompletedEvent(t *testing.T) {
++	t.Parallel()
++	for _, reason := range []string{compactionReasonThreshold, compactionReasonOverflow, compactionReasonManual} {
++		t.Run(reason, func(t *testing.T) {
++			t.Parallel()
++			summary := newStreamBuilder().AddContent("the summary").AddStopWithUsage(50, 7).Build()
++			prov := &queueProvider{id: "test/mock-model", streams: []chat.MessageStream{summary}}
++			root := agent.New("root", "test", agent.WithModel(prov))
++			rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)),
++				WithSessionCompaction(false), WithModelStore(mockModelStoreWithLimit{limit: 100_000}))
++			require.NoError(t, err)
++
++			var events []Event
++			sink := EventSinkFunc(func(e Event) { events = append(events, e) })
++			require.NoError(t, rt.compactWithReason(t.Context(), twoMessageSession(), "", reason, sink))
++
++			done := completedCompactions(events)
++			require.Len(t, done, 1)
++			assert.Equal(t, CompactionOutcomeApplied, done[0].Outcome)
++			assert.Equal(t, reason, done[0].Reason)
++			for _, ev := range events {
++				if e, ok := ev.(*SessionCompactionEvent); ok && e.Status == "started" {
++					assert.Empty(t, e.Reason, "the started event carries no reason")
++				}
++			}
++		})
++	}
++}
++
++func TestCompactionReasonOnASkippedCompaction(t *testing.T) {
++	t.Parallel()
++	empty := newStreamBuilder().AddStopWithUsage(1, 0).Build()
++	prov := &queueProvider{id: "test/mock-model", streams: []chat.MessageStream{empty}}
++	root := agent.New("root", "test", agent.WithModel(prov))
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)),
++		WithSessionCompaction(false), WithModelStore(mockModelStoreWithLimit{limit: 100_000}))
++	require.NoError(t, err)
++
++	var events []Event
++	sink := EventSinkFunc(func(e Event) { events = append(events, e) })
++	require.NoError(t, rt.compactWithReason(t.Context(), twoMessageSession(), "", compactionReasonOverflow, sink))
++
++	done := completedCompactions(events)
++	require.Len(t, done, 1)
++	assert.Equal(t, CompactionOutcomeSkipped, done[0].Outcome)
++	assert.Equal(t, compactionReasonOverflow, done[0].Reason)
++}
++
++func TestCompactionReasonOfABackgroundCompaction(t *testing.T) {
++	t.Parallel()
++	prov := &mockCompactor{id: "anthropic/claude-test", opts: map[string]any{nativeCompactionOpt: true}, result: nativeResult()}
++	root := agent.New("root", "help", agent.WithModel(prov))
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(root)), WithModelStore(mockModelStoreWithLimit{limit: 100_000}))
++	require.NoError(t, err)
++	t.Cleanup(func() { require.NoError(t, rt.Close()) })
++	sess := nativeTestSession()
++	sess.SetUsage(60_001, 0)
++	ctx := t.Context()
++	var events []Event
++	sink := EventSinkFunc(func(e Event) { events = append(events, e) })
++	c := newCompactionController(rt, sess, sink, &userconfig.Settings{BackgroundCompaction: true, BackgroundCompactionThreshold: 60})
++	defer c.Close(ctx)
++	c.BeforeTurn(ctx, root, 100_000)
++	require.NotNil(t, c.job)
++	select {
++	case <-c.job.done:
++	case <-time.After(5 * time.Second):
++		t.Fatal("compactor did not finish")
++	}
++	c.BeforeTurn(ctx, root, 100_000)
++
++	done := completedCompactions(events)
++	require.Len(t, done, 1)
++	assert.Equal(t, CompactionOutcomeApplied, done[0].Outcome)
++	assert.Equal(t, compactionReasonThreshold, done[0].Reason)
++}
+diff --git a/pkg/runtime/event.go b/pkg/runtime/event.go
+index e8d1a801f..a43a8d099 100644
+--- a/pkg/runtime/event.go
++++ b/pkg/runtime/event.go
+@@ -657,6 +657,11 @@ type SessionCompactionEvent struct {
+ 	// servers; consumers should treat empty as "applied" for backward
+ 	// compatibility.
+ 	Outcome string `json:"outcome,omitempty"`
++	// Reason says why a compaction the runtime attempted ran: "threshold",
++	// "overflow" or "manual". Set on its "completed" event only; empty on
++	// "started" and on a completion skipped before any attempt (added by
++	// Agentry's build).
++	Reason string `json:"reason,omitempty"`
+ }
+ 
+ func SessionCompaction(sessionID, status, agentName string) Event {
+diff --git a/pkg/runtime/session_compaction.go b/pkg/runtime/session_compaction.go
+index e67d43b8f..c064cebc8 100644
+--- a/pkg/runtime/session_compaction.go
++++ b/pkg/runtime/session_compaction.go
+@@ -83,7 +83,8 @@ func (r *LocalRuntime) doCompact(ctx context.Context, sess *session.Session, a *
+ 		return
+ 	}
+ 	outcome := r.applyCompactionResult(ctx, sess, a, result, reason, events)
+-	events.Emit(SessionCompactionCompleted(sess.ID, outcome, a.Name()))
++	// The completed event says why the compaction ran (added by Agentry's build).
++	events.Emit(sessionCompactionCompletedFor(sess.ID, outcome, a.Name(), reason))
+ }
+ 
+ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Session, a *agent.Agent, additionalPrompt, reason string, events EventSink) (result *compactor.Result) {
+@@ -119,7 +120,8 @@ func (r *LocalRuntime) generateCompaction(ctx context.Context, sess *session.Ses
+ 	outcome := CompactionOutcomeApplied
+ 	defer func() {
+ 		if result == nil {
+-			events.Emit(SessionCompactionCompleted(sess.ID, outcome, a.Name()))
++			// The completed event says why the compaction ran (added by Agentry's build).
++			events.Emit(sessionCompactionCompletedFor(sess.ID, outcome, a.Name(), reason))
+ 		}
+ 	}()
+ 

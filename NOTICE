@@ -78,6 +78,13 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    where it changes them, and adds three files of its own under `pkg/runtime`
    and `pkg/config/latest`, each headed as not part of upstream. The image
    keeps it beside the other three.
+10. `build/docker-agent/compaction-reason.patch` is applied after the four.
+   The `completed` session_compaction event of a compaction the runtime
+   attempted says why it ran (`threshold`, `overflow` or `manual`). It changes
+   `pkg/runtime/event.go`, `pkg/runtime/session_compaction.go` and
+   `pkg/runtime/background_compaction.go`, each marked where it changes them,
+   and adds two files of its own under `pkg/runtime`, each headed as not part
+   of upstream. The image keeps it beside the other four.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the
