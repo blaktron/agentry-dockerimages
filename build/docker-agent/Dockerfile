@@ -108,7 +108,7 @@ FROM ${GO_IMAGE} AS builder
 # CGO needs a C compiler and the Go alpine images ship none. Upstream uses zig
 # from its xx toolchain; without xx, gcc with musl-dev is the usual Alpine pair
 # for static linking. The ldd check after the build confirms the result.
-RUN apk add --no-cache gcc musl-dev patch
+RUN apk add --no-cache gcc musl-dev patch git jq
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -177,6 +177,20 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'TurnUsage|TestUsage' \
 	./pkg/acp
+# The whole suites of every package the patches touch, so an upstream test a
+# patch breaks fails the build too, not only the patches' own tests above.
+# git and jq (above) are for the worktree and hook tests. Left out: the tests
+# that read files upstream's .dockerignore keeps out of the build context,
+# examples/*.yaml (TestLoadExamples, TestLoadLayaEvaluatorExample,
+# TestRoutingExample_*, TestRoutingCommandExample) and pkg/teamloader/testdata
+# (TestAutoModelFallbackError, TestInstructionExpansion, TestOverrideModel,
+# TestToolsetInstructions, TestWithPromptFiles).
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 \
+	-skip '^(TestLoadExamples|TestLoadLayaEvaluatorExample|TestRoutingExample_.*|TestRoutingCommandExample|TestAutoModelFallbackError|TestInstructionExpansion|TestOverrideModel|TestToolsetInstructions|TestWithPromptFiles)$' \
+	./pkg/acp ./pkg/agent ./pkg/config/latest ./pkg/modelerrors \
+	./pkg/runtime ./pkg/session ./pkg/teamloader
 RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	set -ex; \
