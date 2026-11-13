@@ -88,9 +88,17 @@
 #      unknown and `used` is the session's tokens either way, so an ACP client
 #      counts a session's tokens on any model. The /usage command is
 #      unchanged. Its tests run in the build.
+#  12. acp-context-events.patch, applied with no fuzz after the six, reports
+#      two changes to a session's history over ACP as extension
+#      notifications, apart from the agent's words: an applied compaction
+#      (`_agentry/session_compaction`, with its reason), in a prompt and from
+#      /compact, and a cold-cache clear (`_agentry/results_cleared`), which
+#      the runtime now emits as a `results_cleared` event (also printed by
+#      `run --exec --json`). A client that does not know the methods ignores
+#      them. Its tests run in the build.
 #
 # The patches' files carry a note that Agentry's build adds or changes them, and
-# the image keeps the six patches at /usr/share/doc/docker-agent/.
+# the image keeps the seven patches at /usr/share/doc/docker-agent/.
 #
 # Everything else matches upstream (packages, non-root user, /data and /work,
 # ENTRYPOINT), so the runner's conformance tests, recorded against the vendor
@@ -113,7 +121,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . ./
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch /agentry/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch acp-context-events.patch /agentry/
 # --fuzz=0: a hunk that no longer matches exactly fails the build rather than
 # landing somewhere near.
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/cold-cache-clear.patch
@@ -122,6 +130,7 @@ RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/loop-nudge.pa
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/length-recovery.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/compaction-reason.patch
 RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/acp-usage.patch
+RUN patch -p1 --forward --fuzz=0 --no-backup-if-mismatch </agentry/acp-context-events.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
 	go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.47.0 && \
 	go mod verify
@@ -177,6 +186,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 	--mount=type=cache,target=/go/pkg/mod \
 	go test -tags no_audio -count=1 -run 'TurnUsage|TestUsage' \
 	./pkg/acp
+# acp-context-events.patch's tests: a cold-cache clear emits one
+# results_cleared event and a warm turn none, a prompt sends one notification
+# per applied compaction (with its reason) and per clear, none for a skipped
+# or failed compaction and none as message text, /compact sends one only when
+# applied, and the event registry knows the new event.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg/mod \
+	go test -tags no_audio -count=1 -run 'ColdCacheClearIsReported|ReportsAppliedCompactions|ReportsAnAppliedCompaction|TestEventTypes' \
+	./pkg/runtime ./pkg/acp
 # The whole suites of every package the patches touch, so an upstream test a
 # patch breaks fails the build too, not only the patches' own tests above.
 # git and jq (above) are for the worktree and hook tests. Left out: the tests
@@ -215,7 +233,7 @@ ENV TERM=xterm-256color
 ENV DOCKER_AGENT_DISABLE_DESKTOP_PROXY=1
 COPY --from=gateway /docker-mcp /usr/local/lib/docker/cli-plugins/
 COPY --from=builder /docker-agent /docker-agent
-COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch /usr/share/doc/docker-agent/
+COPY --from=agentry cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch acp-context-events.patch /usr/share/doc/docker-agent/
 USER docker-agent
 WORKDIR /work
 ENTRYPOINT ["/docker-agent"]
@@ -223,4 +241,4 @@ ENTRYPOINT ["/docker-agent"]
 LABEL org.opencontainers.image.title="docker-agent (built by Agentry)" \
 	org.opencontainers.image.source="https://github.com/docker/docker-agent" \
 	org.opencontainers.image.licenses="Apache-2.0" \
-	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs, loop-nudge, length-recovery, compaction-reason and acp-usage patches, for the QuickAgent runtime's default harness"
+	org.opencontainers.image.description="Docker Agent built by Agentry from a pinned upstream commit with its cold-cache clear, long-runs, loop-nudge, length-recovery, compaction-reason, acp-usage and acp-context-events patches, for the QuickAgent runtime's default harness"

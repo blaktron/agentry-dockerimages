@@ -91,6 +91,14 @@ statement of the changes; `build/docker-agent/Dockerfile` states them in full):
    `pkg/acp/usage_test.go`, each marked where it changes them, and adds two
    files of its own under `pkg/acp`, each headed as not part of upstream. The
    image keeps it beside the other five.
+12. `build/docker-agent/acp-context-events.patch` is applied after the six. An
+   applied compaction and a cold-cache clear are reported over ACP as
+   extension notifications, and the clear emits a runtime event. It changes
+   `pkg/acp/agent.go`, `pkg/acp/commands.go` and `pkg/runtime/loop.go`, each
+   marked where it changes them, extends the first patch's
+   `pkg/runtime/coldclear.go` and its test, and adds two files of its own
+   under `pkg/acp`, each headed as not part of upstream. The image keeps it
+   beside the other six.
 
 Apache-2.0 §3 grants no trademark licence. Nothing built here may be presented
 as a Docker product, and the name "Docker Agent" is used only to identify the

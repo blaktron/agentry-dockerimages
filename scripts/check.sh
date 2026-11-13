@@ -1352,6 +1352,19 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name acp-usage.patch"
 		bad=1
 	fi
+	if [ ! -s "$DOCKER_AGENT_CTX/acp-context-events.patch" ]; then
+		echo "$DOCKER_AGENT_CTX/acp-context-events.patch: missing or empty"
+		bad=1
+	elif ! grep -q '^RUN patch -p1 --forward --fuzz=0 .*acp-context-events\.patch' "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not apply acp-context-events.patch with no fuzz"
+		bad=1
+	elif ! grep -q "go test .*-run 'ColdCacheClearIsReported|ReportsAppliedCompactions" "$DOCKER_AGENT_CTX/Dockerfile"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run acp-context-events.patch's tests"
+		bad=1
+	elif ! grep -q 'acp-context-events\.patch' "$DOCKER_AGENT_CTX/source.env"; then
+		echo "$DOCKER_AGENT_CTX/source.env: does not name acp-context-events.patch"
+		bad=1
+	fi
 	# Every Go package a patch changes has its whole suite run in the build,
 	# so an upstream test a patch breaks fails the build.
 	local suite pkgdir
@@ -1489,8 +1502,15 @@ dockerAgentImage() {
 		echo "FAIL the binary does not carry the session usage without a window (acp-usage.patch)"
 		bad=1
 	fi
+	# The patch's method names (acp-context-events.patch); change them with it.
+	if grep -aq '_agentry/session_compaction' "$out/docker-agent" && grep -aq '_agentry/results_cleared' "$out/docker-agent"; then
+		echo "ok   the binary reports compactions and clears over ACP"
+	else
+		echo "FAIL the binary does not report compactions and clears over ACP (acp-context-events.patch)"
+		bad=1
+	fi
 	local patch
-	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch; do
+	for patch in cold-cache-clear.patch long-runs.patch loop-nudge.patch length-recovery.patch compaction-reason.patch acp-usage.patch acp-context-events.patch; do
 		if "${run[@]}" --entrypoint /bin/sh "$ref" -c "test -s /usr/share/doc/docker-agent/$patch"; then
 			echo "ok   the image keeps $patch at /usr/share/doc/docker-agent/"
 		else
