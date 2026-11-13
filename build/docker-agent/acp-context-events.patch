@@ -1,0 +1,354 @@
+diff --git a/pkg/acp/agent.go b/pkg/acp/agent.go
+index fafad4907..77ed5774a 100644
+--- a/pkg/acp/agent.go
++++ b/pkg/acp/agent.go
+@@ -941,6 +941,12 @@ func (a *Agent) runAgent(ctx context.Context, acpSess *Session) (stopReason acp.
+ 			if err := a.handleMaxIterationsReached(ctx, acpSess, e); err != nil {
+ 				return "", err
+ 			}
++
++		case *runtime.SessionCompactionEvent, *runtime.ResultsClearedEvent:
++			// Reported as extension notifications (added by Agentry's build).
++			if err := a.notifyHistoryChange(ctx, acpSess.id, e); err != nil {
++				return "", err
++			}
+ 		}
+ 	}
+ 
+diff --git a/pkg/acp/commands.go b/pkg/acp/commands.go
+index 375be933b..4149c4b69 100644
+--- a/pkg/acp/commands.go
++++ b/pkg/acp/commands.go
+@@ -181,6 +181,8 @@ func (a *Agent) compactSession(ctx context.Context, s *Session, instruction stri
+ 			if e.Status == "completed" {
+ 				outcome = e.Outcome
+ 			}
++			// Reported as an extension notification (added by Agentry's build).
++			resultErr = a.notifyHistoryChange(compactCtx, s.id, e)
+ 		case *runtime.TokenUsageEvent:
+ 			resultErr = a.emitUsage(compactCtx, s.id, usage)
+ 		case *runtime.WarningEvent:
+diff --git a/pkg/acp/contextevents.go b/pkg/acp/contextevents.go
+new file mode 100644
+index 000000000..8d8e1aed0
+--- /dev/null
++++ b/pkg/acp/contextevents.go
+@@ -0,0 +1,60 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (acp-context-events.patch in github.com/blaktron/agentry-dockerimages).
++
++package acp
++
++import (
++	"context"
++
++	"github.com/docker/docker-agent/pkg/runtime"
++)
++
++// The extension notifications that report a change the runtime made to a
++// session's history. They are sent apart from the agent's messages, so a
++// client can count them without reading the agent's words; a client that
++// does not know them ignores them, as ACP asks of any unrecognized
++// extension notification.
++const (
++	// CompactionMethod reports an applied compaction: a summary replaced
++	// part of the history.
++	CompactionMethod = "_agentry/session_compaction"
++	// ResultsClearedMethod reports old tool results replaced with
++	// placeholders.
++	ResultsClearedMethod = "_agentry/results_cleared"
++)
++
++// CompactionNotification is the params of a CompactionMethod notification.
++// Reason is why the compaction ran: "threshold", "overflow" or "manual".
++type CompactionNotification struct {
++	SessionID string `json:"sessionId"`
++	Reason    string `json:"reason,omitempty"`
++}
++
++// ResultsClearedNotification is the params of a ResultsClearedMethod
++// notification. Reason is why the results were cleared ("cold_cache").
++type ResultsClearedNotification struct {
++	SessionID string `json:"sessionId"`
++	Reason    string `json:"reason"`
++}
++
++// compactionApplied reports whether e is the completion of a compaction
++// that changed the history. An empty outcome comes from a runtime that
++// predates outcomes and reads as applied.
++func compactionApplied(e *runtime.SessionCompactionEvent) bool {
++	return e.Status == "completed" && (e.Outcome == runtime.CompactionOutcomeApplied || e.Outcome == "")
++}
++
++// notifyHistoryChange sends the extension notification for event when it
++// is an applied compaction or a results clear, and nothing otherwise.
++func (a *Agent) notifyHistoryChange(ctx context.Context, sessionID string, event runtime.Event) error {
++	switch e := event.(type) {
++	case *runtime.SessionCompactionEvent:
++		if !compactionApplied(e) {
++			return nil
++		}
++		return a.conn.NotifyExtension(ctx, CompactionMethod, CompactionNotification{SessionID: sessionID, Reason: e.Reason})
++	case *runtime.ResultsClearedEvent:
++		return a.conn.NotifyExtension(ctx, ResultsClearedMethod, ResultsClearedNotification{SessionID: sessionID, Reason: e.Reason})
++	}
++	return nil
++}
+diff --git a/pkg/acp/contextevents_test.go b/pkg/acp/contextevents_test.go
+new file mode 100644
+index 000000000..cbff9e98b
+--- /dev/null
++++ b/pkg/acp/contextevents_test.go
+@@ -0,0 +1,105 @@
++// This file is not part of upstream docker-agent: Agentry's build adds it
++// (acp-context-events.patch in github.com/blaktron/agentry-dockerimages).
++
++package acp
++
++import (
++	"context"
++	"encoding/json"
++	"strings"
++	"testing"
++	"testing/synctest"
++
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++
++	"github.com/docker/docker-agent/pkg/config/types"
++	"github.com/docker/docker-agent/pkg/runtime"
++	"github.com/docker/docker-agent/pkg/session"
++)
++
++type extensionNotification struct {
++	Method string
++	Params map[string]any
++}
++
++// extensionNotifications is every notification in lines whose method is an
++// extension method, in order.
++func extensionNotifications(t *testing.T, lines []string) []extensionNotification {
++	t.Helper()
++	var out []extensionNotification
++	for _, line := range lines {
++		var msg struct {
++			ID     json.RawMessage `json:"id"`
++			Method string          `json:"method"`
++			Params map[string]any  `json:"params"`
++		}
++		require.NoError(t, json.Unmarshal([]byte(line), &msg))
++		if msg.ID == nil && strings.HasPrefix(msg.Method, "_") {
++			out = append(out, extensionNotification{Method: msg.Method, Params: msg.Params})
++		}
++	}
++	return out
++}
++
++func TestPromptReportsAppliedCompactionsAndClears(t *testing.T) {
++	t.Parallel()
++	synctest.Test(t, func(t *testing.T) {
++		applied := runtime.SessionCompactionCompleted(testSessionID, runtime.CompactionOutcomeApplied, "root").(*runtime.SessionCompactionEvent)
++		applied.Reason = "threshold"
++		skipped := runtime.SessionCompactionCompleted(testSessionID, runtime.CompactionOutcomeSkipped, "root").(*runtime.SessionCompactionEvent)
++		skipped.Reason = "threshold"
++		failed := runtime.SessionCompactionCompleted(testSessionID, runtime.CompactionOutcomeFailed, "root").(*runtime.SessionCompactionEvent)
++		failed.Reason = "overflow"
++		overflow := runtime.SessionCompactionCompleted(testSessionID, runtime.CompactionOutcomeApplied, "root").(*runtime.SessionCompactionEvent)
++		overflow.Reason = "overflow"
++		rt := &fakeRuntime{events: []runtime.Event{
++			runtime.ResultsCleared(testSessionID, runtime.ResultsClearedReasonColdCache, "root"),
++			runtime.SessionCompaction(testSessionID, "started", "root"),
++			applied,
++			skipped,
++			failed,
++			overflow,
++		}}
++		f := newRunAgentFixture(t, rt, &captureWriter{})
++		require.NoError(t, f.runAgent(t.Context(), f.sess))
++
++		got := extensionNotifications(t, f.out.lines())
++		assert.Equal(t, []extensionNotification{
++			{Method: ResultsClearedMethod, Params: map[string]any{"sessionId": testSessionID, "reason": "cold_cache"}},
++			{Method: CompactionMethod, Params: map[string]any{"sessionId": testSessionID, "reason": "threshold"}},
++			{Method: CompactionMethod, Params: map[string]any{"sessionId": testSessionID, "reason": "overflow"}},
++		}, got)
++		for _, line := range f.out.lines() {
++			assert.NotContains(t, line, "agent_message_chunk", "a history change is never the agent's words")
++		}
++	})
++}
++
++func TestCompactCommandReportsAnAppliedCompaction(t *testing.T) {
++	t.Parallel()
++	for _, outcome := range []string{runtime.CompactionOutcomeApplied, runtime.CompactionOutcomeSkipped} {
++		t.Run(outcome, func(t *testing.T) {
++			t.Parallel()
++			rt := &commandRuntime{current: "root", commands: map[string]types.Commands{"root": {}}}
++			a, s, peer := newPromptTestAgent(t, rt)
++			s.sess.AddMessage(session.UserMessage("history"))
++			rt.summary = func(_ context.Context, sess *session.Session, _ string, sink runtime.EventSink) {
++				done := runtime.SessionCompactionCompleted(sess.ID, outcome, "root").(*runtime.SessionCompactionEvent)
++				done.Reason = "manual"
++				sink.Emit(done)
++			}
++			_, err := a.Prompt(t.Context(), promptRequest("/compact"))
++			require.NoError(t, err)
++
++			got := extensionNotifications(t, peer.out.(*captureWriter).lines())
++			if outcome == runtime.CompactionOutcomeSkipped {
++				assert.Empty(t, got)
++				return
++			}
++			assert.Equal(t, []extensionNotification{
++				{Method: CompactionMethod, Params: map[string]any{"sessionId": s.id, "reason": "manual"}},
++			}, got)
++		})
++	}
++}
+diff --git a/pkg/runtime/coldclear.go b/pkg/runtime/coldclear.go
+index 170e44459..632e1a315 100644
+--- a/pkg/runtime/coldclear.go
++++ b/pkg/runtime/coldclear.go
+@@ -6,6 +6,7 @@ package runtime
+ import (
+ 	"context"
+ 	"log/slog"
++	"reflect"
+ 
+ 	"github.com/docker/docker-agent/pkg/agent"
+ 	"github.com/docker/docker-agent/pkg/session"
+@@ -16,7 +17,10 @@ import (
+ // ended longer ago than the prompt cache lives, the request re-sends the
+ // whole history uncached, so old tool results are cleared then and the
+ // cleared state is stored for every later request.
+-func (r *LocalRuntime) clearColdToolResults(ctx context.Context, sess *session.Session, a *agent.Agent) {
++//
++// An applied clear is reported as a [ResultsClearedEvent], so a client can
++// tell it from the agent's own words.
++func (r *LocalRuntime) clearColdToolResults(ctx context.Context, sess *session.Session, a *agent.Agent, sink EventSink) {
+ 	c := a.ColdCacheClear()
+ 	if c == nil || sess.IsSubSession() {
+ 		return
+@@ -32,4 +36,35 @@ func (r *LocalRuntime) clearColdToolResults(ctx context.Context, sess *session.S
+ 	if err := r.sessionStore.UpdateSession(ctx, sess); err != nil {
+ 		slog.WarnContext(ctx, "Failed to persist the cold-cache clear", "session_id", sess.ID, "error", err)
+ 	}
++	sink.Emit(ResultsCleared(sess.ID, ResultsClearedReasonColdCache, a.Name()))
++}
++
++// ResultsClearedReasonColdCache is the reason of a clear made because the
++// model server's prompt cache had expired.
++const ResultsClearedReasonColdCache = "cold_cache"
++
++// ResultsClearedEvent says old tool results in the session's history were
++// replaced with placeholders. Reason says why ("cold_cache").
++type ResultsClearedEvent struct {
++	AgentContext
++
++	Type      string `json:"type"`
++	SessionID string `json:"session_id"`
++	Reason    string `json:"reason"`
++}
++
++// ResultsCleared is the event of an applied clear.
++func ResultsCleared(sessionID, reason, agentName string) Event {
++	return &ResultsClearedEvent{
++		Type:         "results_cleared",
++		SessionID:    sessionID,
++		Reason:       reason,
++		AgentContext: newAgentContext(agentName),
++	}
++}
++
++func (e *ResultsClearedEvent) GetSessionID() string { return e.SessionID }
++
++func init() {
++	eventTypes["results_cleared"] = reflect.TypeFor[ResultsClearedEvent]()
+ }
+diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
+index 613e68ab4..a0dd99061 100644
+--- a/pkg/runtime/coldclear_test.go
++++ b/pkg/runtime/coldclear_test.go
+@@ -64,14 +64,28 @@ func coldClearAgent(prov *messageRecordingProvider, extra ...agent.Opt) *agent.A
+ 	return agent.New("root", "instructions", opts...)
+ }
+ 
+-func runColdTurn(t *testing.T, rt *LocalRuntime, sess *session.Session, text string) {
++func runColdTurn(t *testing.T, rt *LocalRuntime, sess *session.Session, text string) []Event {
+ 	t.Helper()
+ 	sess.AddMessage(session.UserMessage(text))
++	var events []Event
+ 	for event := range rt.RunStream(t.Context(), sess) {
+ 		if failure, ok := event.(*ErrorEvent); ok {
+ 			t.Fatalf("unexpected runtime error: %s", failure.Error)
+ 		}
++		events = append(events, event)
+ 	}
++	return events
++}
++
++// clearsIn is the results_cleared events among events.
++func clearsIn(events []Event) []*ResultsClearedEvent {
++	var out []*ResultsClearedEvent
++	for _, event := range events {
++		if e, ok := event.(*ResultsClearedEvent); ok {
++			out = append(out, e)
++		}
++	}
++	return out
+ }
+ 
+ func resultsOf(messages []chat.Message) map[string]string {
+@@ -120,7 +134,7 @@ func TestColdCacheClearSkipsASubSession(t *testing.T) {
+ 	sess.ParentID = "parent"
+ 	sess.AddMessage(session.UserMessage("a delegated task"))
+ 
+-	rt.clearColdToolResults(t.Context(), sess, a)
++	rt.clearColdToolResults(t.Context(), sess, a, EventSinkFunc(func(Event) {}))
+ 	assert.NotContains(t, sess.AttributesSnapshot(), session.ColdClearedAttribute)
+ }
+ 
+@@ -141,6 +155,30 @@ func TestColdCacheClearNotWhileTheCacheIsWarm(t *testing.T) {
+ 	assert.NotContains(t, sess.AttributesSnapshot(), session.ColdClearedAttribute)
+ }
+ 
++// TestColdCacheClearIsReported: an applied clear is a results_cleared event
++// of the session, and a turn while the cache is warm reports none.
++func TestColdCacheClearIsReported(t *testing.T) {
++	t.Parallel()
++	clock := &coldClock{t: coldStart}
++	prov := &messageRecordingProvider{id: "test/mock-model", streams: []*mockStream{
++		newStreamBuilder().AddContent("hello again").AddStopWithUsage(1, 1).Build(),
++		newStreamBuilder().AddContent("still here").AddStopWithUsage(1, 1).Build(),
++	}}
++	rt, err := NewLocalRuntime(t.Context(), team.New(team.WithAgents(coldClearAgent(prov))), WithClock(clock.Now), WithSessionCompaction(false), WithModelStore(mockModelStore{}))
++	require.NoError(t, err)
++	sess := coldHistory(coldStart.Add(-2 * time.Hour))
++
++	clears := clearsIn(runColdTurn(t, rt, sess, "back after lunch"))
++	require.Len(t, clears, 1)
++	assert.Equal(t, "results_cleared", clears[0].Type)
++	assert.Equal(t, ResultsClearedReasonColdCache, clears[0].Reason)
++	assert.Equal(t, sess.ID, clears[0].SessionID)
++	assert.Equal(t, "root", clears[0].GetAgentName())
++
++	clock.Advance(time.Minute)
++	assert.Empty(t, clearsIn(runColdTurn(t, rt, sess, "one more thing")))
++}
++
+ func TestColdCacheClearWithoutTheBlockClearsNothing(t *testing.T) {
+ 	t.Parallel()
+ 	clock := &coldClock{t: coldStart}
+diff --git a/pkg/runtime/loop.go b/pkg/runtime/loop.go
+index 4b4155ce3..65c532d45 100644
+--- a/pkg/runtime/loop.go
++++ b/pkg/runtime/loop.go
+@@ -377,7 +377,7 @@ func (r *LocalRuntime) runStreamLoop(ctx context.Context, sess *session.Session,
+ 	// A cold-cache clear (added by Agentry's build) runs once per stream,
+ 	// before its first model request and any compaction, so it never
+ 	// changes the history inside a turn.
+-	r.clearColdToolResults(ctx, sess, a)
++	r.clearColdToolResults(ctx, sess, a, sink)
+ 
+ 	sink.Emit(StreamStarted(sess.ID, a.Name()))
+ 
