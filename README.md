@@ -561,7 +561,8 @@ It leaves `agent-schema.json` alone for the same reason as the first patch, so
 compaction also changes what upstream's
 `TestPromptCompactionDiagnosticDoesNotOverrideRecovery` in `pkg/acp` sees: the
 run compacts and recovers instead of reporting "Failed to get model
-definition", so that test fails on the patched tree.
+definition". The patch changes that test to expect the compaction warning and
+the recovered answer, marked as the build's change.
 
 `loop-nudge.patch` stops the loop detector from ending a run. Upstream ends
 the run with a `loop_detected` error when the model makes the same tool call
@@ -685,8 +686,13 @@ the first patch's commit, `loop-nudge.patch` against the second's,
 the fourth's, `acp-usage.patch` against the fifth's). The build
 applies all six with `patch --fuzz=0`, so a hunk
 that moved fails the build rather than landing nearby, and runs their tests
-before the binary is built; `scripts/check.sh` fails if any patch, its
-application or its tests leave the Dockerfile.
+before the binary is built. It then runs the whole test suites of every
+package the patches change, so an upstream test a patch breaks fails the build
+too. The builder carries git and jq for the worktree and hook tests. The suites
+leave out only the tests that read files upstream's `.dockerignore` keeps out
+of the build context (`examples/*.yaml` and `pkg/teamloader/testdata`), which
+the Dockerfile names. `scripts/check.sh` fails if any patch, its application,
+its tests or one of the packages it changes leaves the Dockerfile.
 
 The `docker-agent` workflow builds it natively for amd64 and arm64, runs each
 hardened (`scripts/check.sh --docker-agent-image`), joins the two into one tag

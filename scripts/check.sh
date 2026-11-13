@@ -1352,6 +1352,21 @@ checkDockerAgent() {
 		echo "$DOCKER_AGENT_CTX/source.env: does not name acp-usage.patch"
 		bad=1
 	fi
+	# Every Go package a patch changes has its whole suite run in the build,
+	# so an upstream test a patch breaks fails the build.
+	local suite pkgdir
+	suite=$(awk '/^# The whole suites of every package the patches touch/ { f = 1 } f { print } f && /^[^#]/ && !/\\$/ { exit }' "$DOCKER_AGENT_CTX/Dockerfile")
+	if ! grep -q 'go test -tags no_audio -count=1 \\$' <<<"$suite"; then
+		echo "$DOCKER_AGENT_CTX/Dockerfile: does not run the whole suites of the packages the patches change"
+		bad=1
+	else
+		while IFS= read -r pkgdir; do
+			if ! grep -qE "\./$pkgdir( |\$)" <<<"$suite"; then
+				echo "$DOCKER_AGENT_CTX/Dockerfile: the whole-suite step does not run ./$pkgdir, which a patch changes"
+				bad=1
+			fi
+		done < <(sed -n 's#^+++ b/\(pkg/.*\)/[^/]*\.go$#\1#p' "$DOCKER_AGENT_CTX"/*.patch | sort -u)
+	fi
 	return "$bad"
 }
 
