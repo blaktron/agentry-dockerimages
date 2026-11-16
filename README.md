@@ -503,14 +503,24 @@ then `length-recovery.patch`, then `compaction-reason.patch`, then
 `acp-usage.patch`, then `acp-context-events.patch`.
 
 The patch adds one agent setting, `cold_cache_clear: {after, keep_turns,
-keep_browser, browser_tools}`. On the first model request of a turn that
-starts more than `after` since the previous model response ended, when the
+keep_browser, browser_tools, min_bytes}`. On the first model request of a turn
+that starts more than `after` since the previous model response ended, when the
 provider's prompt cache has expired and the whole history is re-sent uncached
 anyway, every tool result older than the newest `keep_turns` turns before the
 current one (default 2), and every result of a tool in `browser_tools` but the
-newest `keep_browser` (default 2), is sent as
-`[cleared: <tool>(<arguments>) returned <n> bytes; call it again to read it]`,
-with the arguments cut at 200 bytes. The stored session keeps every original
+newest `keep_browser` (default 2), is replaced by a placeholder. An old result
+shorter than `min_bytes` stays, since clearing it saves next to nothing and
+takes away what the agent's earlier replies were written from; a browser
+tool's result and one that carries an attachment go whatever their size once
+they are due, and with `min_bytes` set no result gives way to a placeholder
+longer than its own text. Without `min_bytes` every old result goes. The
+placeholder reads `[Note from the agent runtime: your call
+<tool>(<arguments>) returned <n> bytes here. You read them in full at the time,
+and your later replies were written with them. They were then set aside to save
+space. Call the tool again if you need the text.]`, with the arguments cut at
+200 bytes. It is worded so that it never
+reads as a call that returned nothing, which can lead a model to disown
+answers it wrote from the result. The stored session keeps every original
 and records which results are cleared, so later requests, a reload of the
 session and docker-agent's own compaction send the same bytes. Nothing is
 cleared inside a turn, and an agent without the setting behaves as upstream.
