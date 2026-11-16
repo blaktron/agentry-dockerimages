@@ -45,10 +45,10 @@ index ea13b4bf6..78c4e418f 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index 4e1a4f13d..8e207938f 100644
+index c0456d147..75e21a10d 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -293,6 +293,14 @@ const (
+@@ -296,6 +296,14 @@ const (
  	DefaultColdClearKeepBrowser = 2
  )
  
@@ -89,10 +89,10 @@ index 000000000..e7d2d47a8
 +	assert.Equal(t, "/scratch/notes.md", cfg.Agents[0].CompactionNotes)
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index 8e78c05e8..5b006ed60 100644
+index 8a77771d7..0a27fa78f 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
-@@ -790,6 +790,10 @@ type AgentConfig struct {
+@@ -793,6 +793,10 @@ type AgentConfig struct {
  	// first model request of a turn that starts after the prompt cache has
  	// expired. Absent, nothing is cleared. Added by Agentry's build.
  	ColdCacheClear *ColdCacheClearConfig `json:"cold_cache_clear,omitempty" yaml:"cold_cache_clear,omitempty"`

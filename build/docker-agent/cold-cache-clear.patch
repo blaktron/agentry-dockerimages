@@ -24,10 +24,10 @@ index f70afdb9d..ea13b4bf6 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index cf92870ce..4e1a4f13d 100644
+index cf92870ce..c0456d147 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -276,6 +276,42 @@ func WithMaxToolResultTokens(n int) Opt {
+@@ -276,6 +276,48 @@ func WithMaxToolResultTokens(n int) Opt {
  	}
  }
  
@@ -39,6 +39,9 @@ index cf92870ce..4e1a4f13d 100644
 +	KeepTurns    int
 +	KeepBrowser  int
 +	BrowserTools []string
++	// MinBytes is the smallest result worth clearing; 0 clears every old
++	// result whatever its size.
++	MinBytes int
 +}
 +
 +// The turns and browser results a cold-cache clear keeps whole when its
@@ -63,6 +66,9 @@ index cf92870ce..4e1a4f13d 100644
 +		if c.KeepBrowser != nil {
 +			cc.KeepBrowser = *c.KeepBrowser
 +		}
++		if c.MinBytes != nil {
++			cc.MinBytes = *c.MinBytes
++		}
 +		a.coldCacheClear = cc
 +	}
 +}
@@ -72,10 +78,10 @@ index cf92870ce..4e1a4f13d 100644
  		a.numHistoryItems = numHistoryItems
 diff --git a/pkg/config/latest/cold_cache_clear_test.go b/pkg/config/latest/cold_cache_clear_test.go
 new file mode 100644
-index 000000000..c6dff67e3
+index 000000000..2e6376878
 --- /dev/null
 +++ b/pkg/config/latest/cold_cache_clear_test.go
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,57 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -100,6 +106,7 @@ index 000000000..c6dff67e3
 +      keep_turns: 3
 +      keep_browser: 1
 +      browser_tools: [browser_snapshot, browser_navigate]
++      min_bytes: 4096
 +`))
 +	require.NoError(t, err)
 +	require.Len(t, cfg.Agents, 1)
@@ -111,6 +118,8 @@ index 000000000..c6dff67e3
 +	require.NotNil(t, c.KeepBrowser)
 +	assert.Equal(t, 1, *c.KeepBrowser)
 +	assert.Equal(t, []string{"browser_snapshot", "browser_navigate"}, c.BrowserTools)
++	require.NotNil(t, c.MinBytes)
++	assert.Equal(t, 4096, *c.MinBytes)
 +}
 +
 +func TestColdCacheClearIsValidated(t *testing.T) {
@@ -119,6 +128,7 @@ index 000000000..c6dff67e3
 +		"no after":         "      keep_turns: 2\n",
 +		"negative keep":    "      after: 5m\n      keep_turns: -1\n",
 +		"negative browser": "      after: 5m\n      keep_browser: -1\n",
++		"negative size":    "      after: 5m\n      min_bytes: -1\n",
 +		"unknown key":      "      after: 5m\n      keep_everything: true\n",
 +		"unparsable after": "      after: soon\n",
 +	} {
@@ -130,10 +140,10 @@ index 000000000..c6dff67e3
 +	}
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index 89e6abbff..8e78c05e8 100644
+index 89e6abbff..8a77771d7 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
-@@ -533,6 +533,19 @@ type FallbackConfig struct {
+@@ -533,6 +533,22 @@ type FallbackConfig struct {
  	Cooldown Duration `json:"cooldown"`
  }
  
@@ -142,18 +152,21 @@ index 89e6abbff..8e78c05e8 100644
 +// previous model response ended, every tool result older than the newest
 +// KeepTurns turns before the current one is replaced by a placeholder that
 +// names the call, and so is every result of a tool in BrowserTools but the
-+// newest KeepBrowser. KeepTurns and KeepBrowser default to 2.
++// newest KeepBrowser. KeepTurns and KeepBrowser default to 2. A result
++// shorter than MinBytes stays wherever it falls, unless it is a browser
++// tool's or carries an attachment; absent or 0, every old result is cleared.
 +type ColdCacheClearConfig struct {
 +	After        Duration `json:"after" yaml:"after"`
 +	KeepTurns    *int     `json:"keep_turns,omitempty" yaml:"keep_turns,omitempty"`
 +	KeepBrowser  *int     `json:"keep_browser,omitempty" yaml:"keep_browser,omitempty"`
 +	BrowserTools []string `json:"browser_tools,omitempty" yaml:"browser_tools,omitempty"`
++	MinBytes     *int     `json:"min_bytes,omitempty" yaml:"min_bytes,omitempty"`
 +}
 +
  // Duration is a wrapper around time.Duration that supports YAML/JSON unmarshaling
  // from string format (e.g., "1m", "30s", "2h30m").
  type Duration struct {
-@@ -773,6 +786,10 @@ type AgentConfig struct {
+@@ -773,6 +789,10 @@ type AgentConfig struct {
  	// Disabled by default; only positive values enable the cap.
  	MaxToolResultTokens int `json:"max_tool_result_tokens,omitempty"`
  	NumHistoryItems     int `json:"num_history_items,omitempty"`
@@ -165,7 +178,7 @@ index 89e6abbff..8e78c05e8 100644
  	// the proactive threshold trigger and the post-overflow auto-recovery.
  	// Manual /compact stays available regardless. Pointer (tri-state) so
 diff --git a/pkg/config/latest/validate.go b/pkg/config/latest/validate.go
-index 2a0f0a7b1..f3f58ecdb 100644
+index 2a0f0a7b1..5793b555f 100644
 --- a/pkg/config/latest/validate.go
 +++ b/pkg/config/latest/validate.go
 @@ -87,6 +87,9 @@ func (t *Config) Validate() error {
@@ -178,7 +191,7 @@ index 2a0f0a7b1..f3f58ecdb 100644
  		if err := agent.validateHarness(); err != nil {
  			return err
  		}
-@@ -230,6 +233,25 @@ func (a *AgentConfig) validateFallback() error {
+@@ -230,6 +233,28 @@ func (a *AgentConfig) validateFallback() error {
  	return nil
  }
  
@@ -197,6 +210,9 @@ index 2a0f0a7b1..f3f58ecdb 100644
 +	}
 +	if c.KeepBrowser != nil && *c.KeepBrowser < 0 {
 +		return errors.New("cold_cache_clear.keep_browser must be >= 0")
++	}
++	if c.MinBytes != nil && *c.MinBytes < 0 {
++		return errors.New("cold_cache_clear.min_bytes must be >= 0")
 +	}
 +	return nil
 +}
@@ -247,7 +263,7 @@ index 000000000..170e44459
 +}
 diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
 new file mode 100644
-index 000000000..613e68ab4
+index 000000000..214c256ef
 --- /dev/null
 +++ b/pkg/runtime/coldclear_test.go
 @@ -0,0 +1,200 @@
@@ -351,7 +367,7 @@ index 000000000..613e68ab4
 +
 +	require.Len(t, prov.recordedMessages, 1)
 +	got := resultsOf(prov.recordedMessages[0])
-+	assert.Equal(t, `[cleared: read_file({"path":"a.go"}) returned 16 bytes; call it again to read it]`, got["old-a.go"])
++	assert.Equal(t, `[Note from the agent runtime: read_file({"path":"a.go"}) returned 16 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["old-a.go"])
 +	assert.Equal(t, "contents of b.go", got["old-b.go"])
 +	assert.Equal(t, "contents of c.go", got["old-c.go"])
 +	// The stored item keeps the original; the session records the clear.
@@ -435,7 +451,7 @@ index 000000000..613e68ab4
 +	require.Len(t, prov.recordedMessages, 2)
 +	for i, request := range prov.recordedMessages {
 +		for id, content := range resultsOf(request) {
-+			assert.False(t, strings.HasPrefix(content, "[cleared: "), "request %d cleared %s inside the turn", i, id)
++			assert.False(t, strings.HasPrefix(content, "[Note from the agent runtime: "), "request %d cleared %s inside the turn", i, id)
 +		}
 +	}
 +
@@ -443,8 +459,8 @@ index 000000000..613e68ab4
 +	runColdTurn(t, rt, sess, "build it again")
 +	require.Len(t, prov.recordedMessages, 4)
 +	first, second := resultsOf(prov.recordedMessages[2]), resultsOf(prov.recordedMessages[3])
-+	assert.True(t, strings.HasPrefix(first["old-a.go"], "[cleared: read_file"))
-+	assert.True(t, strings.HasPrefix(first["old-b.go"], "[cleared: read_file"))
++	assert.True(t, strings.HasPrefix(first["old-a.go"], "[Note from the agent runtime: read_file"))
++	assert.True(t, strings.HasPrefix(first["old-b.go"], "[Note from the agent runtime: read_file"))
 +	assert.Equal(t, "built", first["slow"])
 +	// The cleared prefix is byte-stable within the turn.
 +	for _, id := range []string{"old-a.go", "old-b.go", "old-c.go", "slow"} {
@@ -469,10 +485,10 @@ index fe5245431..d0acacd50 100644
  	if a.HasHarness() {
 diff --git a/pkg/session/coldclear.go b/pkg/session/coldclear.go
 new file mode 100644
-index 000000000..c0ef95ab4
+index 000000000..afd32ca25
 --- /dev/null
 +++ b/pkg/session/coldclear.go
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,219 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -523,9 +539,13 @@ index 000000000..c0ef95ab4
 +// ClearColdToolResults marks for clearing every tool result older than the
 +// newest c.KeepTurns turns before the current one, and every result of a tool
 +// in c.BrowserTools but the newest c.KeepBrowser of them, wherever they fall.
-+// A turn begins at a user message the user sent; the newest such message is
-+// the current turn's, which has no results yet. It reports whether a result
-+// was newly marked; the caller persists the session.
++// An old result shorter than c.MinBytes stays: its placeholder would save
++// next to nothing, and the replies written with it would be left with no sign
++// of what they rest on. A browser tool's result and one that carries an
++// attachment go whatever their size. A turn begins at a user message the user
++// sent; the newest such message is the current turn's, which has no results
++// yet. It reports whether a result was newly marked; the caller persists the
++// session.
 +func (s *Session) ClearColdToolResults(c agent.ColdCacheClear) bool {
 +	s.mu.Lock()
 +	defer s.mu.Unlock()
@@ -562,10 +582,10 @@ index 000000000..c0ef95ab4
 +			continue
 +		}
 +		id := m.Message.ToolCallID
-+		drop := i < keepFrom
++		drop := i < keepFrom && !smallResult(&m.Message, c.MinBytes)
 +		if slices.Contains(c.BrowserTools, names[id]) {
 +			browser = append(browser, id)
-+			drop = drop || len(browser) > c.KeepBrowser
++			drop = i < keepFrom || len(browser) > c.KeepBrowser
 +		}
 +		if drop && !cleared[id] {
 +			cleared[id] = true
@@ -585,6 +605,23 @@ index 000000000..c0ef95ab4
 +	}
 +	s.Attributes[ColdClearedAttribute] = strings.Join(ids, "\n")
 +	return true
++}
++
++// smallResult reports whether result is shorter than minBytes and carries no
++// attachment, so that clearing it is not worth what it takes away.
++func smallResult(result *chat.Message, minBytes int) bool {
++	return toolResultTextualBytes(result) < minBytes && resultAttachments(result) == 0
++}
++
++// resultAttachments counts the parts of result that are not text.
++func resultAttachments(result *chat.Message) int {
++	n := 0
++	for _, part := range result.MultiContent {
++		if part.Type != chat.MessagePartTypeText && part.Type != chat.MessagePartTypeDocument {
++			n++
++		}
++	}
++	return n
 +}
 +
 +// coldClearedLocked is the set of cleared tool call IDs. The caller holds mu.
@@ -649,8 +686,11 @@ index 000000000..c0ef95ab4
 +}
 +
 +// coldClearPlaceholder names the call that produced result and its size,
-+// and says how to get it back. It is built from the stored call alone and
-+// never quotes the result.
++// says that the result was read in full when it arrived and was set aside
++// later, and says how to get it back. A placeholder that reads as a call that
++// returned nothing leaves the replies written with the result looking as if
++// they rest on nothing, and a model then disowns answers that were right. It
++// is built from the stored call alone and never quotes the result.
 +func coldClearPlaceholder(call tools.ToolCall, result *chat.Message) string {
 +	name := call.Function.Name
 +	if name == "" {
@@ -658,23 +698,22 @@ index 000000000..c0ef95ab4
 +	}
 +	args := cutArguments(call.Function.Arguments)
 +	size := fmt.Sprintf("%d bytes", toolResultTextualBytes(result))
-+	attachments := 0
-+	for _, part := range result.MultiContent {
-+		if part.Type != chat.MessagePartTypeText && part.Type != chat.MessagePartTypeDocument {
-+			attachments++
-+		}
-+	}
-+	if attachments > 0 {
++	switch attachments := resultAttachments(result); {
++	case attachments == 1:
++		size += " and 1 attachment"
++	case attachments > 1:
 +		size += fmt.Sprintf(" and %d attachments", attachments)
 +	}
-+	return fmt.Sprintf("[cleared: %s(%s) returned %s; call it again to read it]", name, args, size)
++	return fmt.Sprintf("[Note from the agent runtime: %s(%s) returned %s here. You read them in full at the time, "+
++		"and your later replies were written with them. They were then set aside to save space. "+
++		"Call the tool again if you need the text.]", name, args, size)
 +}
 diff --git a/pkg/session/coldclear_test.go b/pkg/session/coldclear_test.go
 new file mode 100644
-index 000000000..a3b6a68f6
+index 000000000..7ab73cbe0
 --- /dev/null
 +++ b/pkg/session/coldclear_test.go
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,276 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -744,12 +783,12 @@ index 000000000..a3b6a68f6
 +	cleared := []string{"t1-0", "t1-1", "t2-0", "t3-0"}
 +	kept := []string{"t3-1", "t3-2", "t4-0"}
 +	for _, id := range cleared {
-+		assert.True(t, strings.HasPrefix(got[id], "[cleared: "), "%s should be cleared: %q", id, got[id])
++		assert.True(t, strings.HasPrefix(got[id], "[Note from the agent runtime: "), "%s should be cleared: %q", id, got[id])
 +	}
 +	for _, id := range kept {
 +		assert.True(t, strings.HasPrefix(got[id], "result of "), "%s should be whole: %q", id, got[id])
 +	}
-+	assert.Equal(t, `[cleared: fs_read({"path":"a.go"}) returned 27 bytes; call it again to read it]`, got["t1-0"])
++	assert.Equal(t, `[Note from the agent runtime: fs_read({"path":"a.go"}) returned 27 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["t1-0"])
 +}
 +
 +func TestColdClearKeepsOnlyTheNewestBrowserResultsInsideKeptTurns(t *testing.T) {
@@ -760,7 +799,7 @@ index 000000000..a3b6a68f6
 +
 +	require.True(t, sess.ClearColdToolResults(coldConfig))
 +	got := toolResults(sess.GetMessages(coldAgent()))
-+	assert.True(t, strings.HasPrefix(got["t1-0"], "[cleared: browser_snapshot({})"))
++	assert.True(t, strings.HasPrefix(got["t1-0"], "[Note from the agent runtime: browser_snapshot({})"))
 +	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-1"])
 +	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-2"])
 +}
@@ -797,17 +836,80 @@ index 000000000..a3b6a68f6
 +		}
 +		assert.NotContains(t, m.Content, resultSecret)
 +		assert.Nil(t, m.MultiContent)
-+		assert.Equal(t, `[cleared: fs_read({"path":".env","token":"[REDACTED]"}) returned 34 bytes and 1 attachments; call it again to read it]`, m.Content)
++		assert.Equal(t, `[Note from the agent runtime: fs_read({"path":".env","token":"[REDACTED]"}) returned 34 bytes and 1 attachment here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, m.Content)
 +	}
 +	// The stored result is the original.
 +	assert.Contains(t, sess.Messages[2].Message.Message.Content, resultSecret)
++}
++
++// sized appends a turn to sess whose one call, of name, returned a text of
++// size bytes and, when image is set, an attachment.
++func sized(sess *Session, n int, name string, size int, image bool) {
++	at := coldBase.Add(time.Duration(n) * time.Minute).Format(time.RFC3339)
++	id := fmt.Sprintf("t%d-0", n)
++	sess.AddMessage(UserMessage(fmt.Sprintf("question %d", n)))
++	sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: at,
++		ToolCalls: []tools.ToolCall{{ID: id, Function: tools.FunctionCall{Name: name, Arguments: `{}`}}}}})
++	result := chat.Message{Role: chat.MessageRoleTool, ToolCallID: id, Content: strings.Repeat("x", size)}
++	if image {
++		result.MultiContent = []chat.MessagePart{{Type: chat.MessagePartTypeText, Text: result.Content},
++			{Type: chat.MessagePartTypeImageURL, ImageURL: &chat.MessageImageURL{URL: "data:image/png;base64,AAAA"}}}
++	}
++	sess.AddMessage(&Message{Message: result})
++	sess.AddMessage(&Message{Message: chat.Message{Role: chat.MessageRoleAssistant, CreatedAt: at, Content: fmt.Sprintf("answer %d", n)}})
++}
++
++func TestColdClearKeepsAResultSmallerThanMinBytes(t *testing.T) {
++	t.Parallel()
++	sess := New()
++	sized(sess, 1, "fs_read", 4095, false)
++	sized(sess, 2, "fs_read", 4096, false)
++	sized(sess, 3, "browser_snapshot", 10, false)
++	sized(sess, 4, "screenshot", 10, true)
++	sized(sess, 5, "fs_read", 1, false)
++	sized(sess, 6, "fs_read", 1, false)
++	sess.AddMessage(UserMessage("the question after the pause"))
++
++	c := coldConfig
++	c.MinBytes = 4096
++	c.KeepBrowser = 0
++	require.True(t, sess.ClearColdToolResults(c))
++	got := toolResults(sess.GetMessages(coldAgent()))
++	assert.Equal(t, strings.Repeat("x", 4095), got["t1-0"], "a result under min_bytes stays")
++	for _, id := range []string{"t2-0", "t3-0", "t4-0"} {
++		assert.True(t, strings.HasPrefix(got[id], "[Note from the agent runtime: "), "%s should be cleared: %q", id, got[id])
++	}
++	assert.Equal(t, "[Note from the agent runtime: screenshot({}) returned 10 bytes and 1 attachment"+
++		" here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space."+
++		" Call the tool again if you need the text.]", got["t4-0"])
++
++	// Without min_bytes every old result goes, whatever its size.
++	again := New()
++	sized(again, 1, "fs_read", 1, false)
++	sized(again, 2, "fs_read", 1, false)
++	sized(again, 3, "fs_read", 1, false)
++	again.AddMessage(UserMessage("again"))
++	require.True(t, again.ClearColdToolResults(coldConfig))
++	assert.True(t, strings.HasPrefix(toolResults(again.GetMessages(coldAgent()))["t1-0"], "[Note from the agent runtime: "))
++}
++
++func TestColdClearPlaceholderSaysTheResultWasRead(t *testing.T) {
++	t.Parallel()
++	p := coldClearPlaceholder(tools.ToolCall{Function: tools.FunctionCall{Name: "fs_read", Arguments: `{"path":"a.go"}`}}, &chat.Message{Content: "package a"})
++	assert.Contains(t, p, "You read them in full at the time")
++	assert.Contains(t, p, "your later replies were written with them")
++	assert.Contains(t, p, "set aside to save space")
++	assert.Contains(t, p, `fs_read({"path":"a.go"}) returned 9 bytes`)
++	for _, empty := range []string{"returned nothing", "no result", "empty"} {
++		assert.NotContains(t, p, empty)
++	}
 +}
 +
 +func TestColdClearCutsLongArguments(t *testing.T) {
 +	t.Parallel()
 +	args := `{"query":"` + strings.Repeat("é", 150) + `"}`
 +	p := coldClearPlaceholder(tools.ToolCall{Function: tools.FunctionCall{Name: "search", Arguments: args}}, &chat.Message{Content: "x"})
-+	inner := strings.TrimSuffix(strings.TrimPrefix(p, "[cleared: search("), ") returned 1 bytes; call it again to read it]")
++	inner := strings.TrimSuffix(strings.TrimPrefix(p, "[Note from the agent runtime: search("), ") returned 1 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]")
 +	assert.True(t, utf8.ValidString(inner))
 +	assert.True(t, strings.HasSuffix(inner, "…"))
 +	assert.LessOrEqual(t, len(strings.TrimSuffix(inner, "…")), coldClearArgsMax)
@@ -852,7 +954,7 @@ index 000000000..a3b6a68f6
 +
 +	// The compaction's input carries the placeholder, not the original.
 +	compaction, _, _ := sess.CompactionInput()
-+	assert.True(t, strings.HasPrefix(toolResults(compaction)["t1-0"], "[cleared: fs_read"))
++	assert.True(t, strings.HasPrefix(toolResults(compaction)["t1-0"], "[Note from the agent runtime: fs_read"))
 +	assert.Equal(t, "result of fs_read in turn 1", sess.Messages[2].Message.Message.Content)
 +}
 +
@@ -871,7 +973,7 @@ index 000000000..a3b6a68f6
 +	// The first pause's message began a turn of its own, so turn 3 is
 +	// now older than the two kept.
 +	for _, id := range []string{"t1-0", "t2-0", "t3-0"} {
-+		assert.True(t, strings.HasPrefix(got[id], "[cleared: "), id)
++		assert.True(t, strings.HasPrefix(got[id], "[Note from the agent runtime: "), id)
 +	}
 +	assert.Equal(t, "result of fs_read in turn 5", got["t5-0"])
 +	assert.Equal(t, "t1-0\nt2-0\nt3-0", sess.AttributesSnapshot()[ColdClearedAttribute])

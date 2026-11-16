@@ -32,12 +32,15 @@
 #      the result, and `go version -m /docker-agent` shows it.
 #   6. cold-cache-clear.patch, applied with no fuzz before the build, adds the
 #      agent setting `cold_cache_clear: {after, keep_turns, keep_browser,
-#      browser_tools}`. On the first model request of a turn that starts more
-#      than `after` since the previous model response ended, when the
-#      provider's prompt cache has expired and the history is re-sent uncached
-#      anyway, every tool result older than the newest `keep_turns` turns, and
-#      every result of a tool in `browser_tools` but the newest `keep_browser`,
-#      is sent as a placeholder that names the call and says to call it again.
+#      browser_tools, min_bytes}`. On the first model request of a turn that
+#      starts more than `after` since the previous model response ended, when
+#      the provider's prompt cache has expired and the history is re-sent
+#      uncached anyway, every tool result older than the newest `keep_turns`
+#      turns, and every result of a tool in `browser_tools` but the newest
+#      `keep_browser`, is sent as a placeholder that names the call, says it
+#      was read in full and then set aside, and says to call it again. An old
+#      result under `min_bytes` stays, unless it is a browser tool's or carries
+#      an attachment.
 #      The stored session keeps the originals and records which results are
 #      cleared, so later requests, a reload and a compaction send the same
 #      bytes. Nothing is cleared inside a turn, and an agent without the
