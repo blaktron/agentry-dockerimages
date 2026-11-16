@@ -266,7 +266,7 @@ index 170e44459..632e1a315 100644
 +	eventTypes["results_cleared"] = reflect.TypeFor[ResultsClearedEvent]()
  }
 diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
-index 214c256ef..f21f64944 100644
+index 5d31ff685..09463956c 100644
 --- a/pkg/runtime/coldclear_test.go
 +++ b/pkg/runtime/coldclear_test.go
 @@ -64,14 +64,28 @@ func coldClearAgent(prov *messageRecordingProvider, extra ...agent.Opt) *agent.A

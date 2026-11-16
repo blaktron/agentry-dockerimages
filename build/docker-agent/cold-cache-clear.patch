@@ -263,7 +263,7 @@ index 000000000..170e44459
 +}
 diff --git a/pkg/runtime/coldclear_test.go b/pkg/runtime/coldclear_test.go
 new file mode 100644
-index 000000000..214c256ef
+index 000000000..5d31ff685
 --- /dev/null
 +++ b/pkg/runtime/coldclear_test.go
 @@ -0,0 +1,200 @@
@@ -367,7 +367,7 @@ index 000000000..214c256ef
 +
 +	require.Len(t, prov.recordedMessages, 1)
 +	got := resultsOf(prov.recordedMessages[0])
-+	assert.Equal(t, `[Note from the agent runtime: read_file({"path":"a.go"}) returned 16 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["old-a.go"])
++	assert.Equal(t, `[Note from the agent runtime: your call read_file({"path":"a.go"}) returned 16 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["old-a.go"])
 +	assert.Equal(t, "contents of b.go", got["old-b.go"])
 +	assert.Equal(t, "contents of c.go", got["old-c.go"])
 +	// The stored item keeps the original; the session records the clear.
@@ -459,8 +459,8 @@ index 000000000..214c256ef
 +	runColdTurn(t, rt, sess, "build it again")
 +	require.Len(t, prov.recordedMessages, 4)
 +	first, second := resultsOf(prov.recordedMessages[2]), resultsOf(prov.recordedMessages[3])
-+	assert.True(t, strings.HasPrefix(first["old-a.go"], "[Note from the agent runtime: read_file"))
-+	assert.True(t, strings.HasPrefix(first["old-b.go"], "[Note from the agent runtime: read_file"))
++	assert.True(t, strings.HasPrefix(first["old-a.go"], "[Note from the agent runtime: your call read_file"))
++	assert.True(t, strings.HasPrefix(first["old-b.go"], "[Note from the agent runtime: your call read_file"))
 +	assert.Equal(t, "built", first["slow"])
 +	// The cleared prefix is byte-stable within the turn.
 +	for _, id := range []string{"old-a.go", "old-b.go", "old-c.go", "slow"} {
@@ -485,10 +485,10 @@ index fe5245431..d0acacd50 100644
  	if a.HasHarness() {
 diff --git a/pkg/session/coldclear.go b/pkg/session/coldclear.go
 new file mode 100644
-index 000000000..afd32ca25
+index 000000000..1ef520c51
 --- /dev/null
 +++ b/pkg/session/coldclear.go
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,227 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -542,7 +542,8 @@ index 000000000..afd32ca25
 +// An old result shorter than c.MinBytes stays: its placeholder would save
 +// next to nothing, and the replies written with it would be left with no sign
 +// of what they rest on. A browser tool's result and one that carries an
-+// attachment go whatever their size. A turn begins at a user message the user
++// attachment go whatever their size, except that with c.MinBytes set no
++// result is replaced by a placeholder longer than its own text. A turn begins at a user message the user
 +// sent; the newest such message is the current turn's, which has no results
 +// yet. It reports whether a result was newly marked; the caller persists the
 +// session.
@@ -551,7 +552,7 @@ index 000000000..afd32ca25
 +	defer s.mu.Unlock()
 +
 +	var turns []int
-+	names := map[string]string{}
++	calls := map[string]tools.ToolCall{}
 +	for i, item := range s.Messages {
 +		m := item.Message
 +		if m == nil {
@@ -564,7 +565,7 @@ index 000000000..afd32ca25
 +			}
 +		case chat.MessageRoleAssistant:
 +			for _, call := range m.Message.ToolCalls {
-+				names[call.ID] = call.Function.Name
++				calls[call.ID] = call
 +			}
 +		}
 +	}
@@ -582,10 +583,16 @@ index 000000000..afd32ca25
 +			continue
 +		}
 +		id := m.Message.ToolCallID
-+		drop := i < keepFrom && !smallResult(&m.Message, c.MinBytes)
-+		if slices.Contains(c.BrowserTools, names[id]) {
++		drop := i < keepFrom && !notWorthClearing(&m.Message, c.MinBytes)
++		if slices.Contains(c.BrowserTools, calls[id].Function.Name) {
 +			browser = append(browser, id)
++			// A browser result is stale at the next navigation, so it goes
++			// whatever its size once it is old or past the newest kept.
 +			drop = i < keepFrom || len(browser) > c.KeepBrowser
++		}
++		if drop && c.MinBytes > 0 && resultAttachments(&m.Message) == 0 &&
++			toolResultTextualBytes(&m.Message) <= len(coldClearPlaceholder(calls[id], &m.Message)) {
++			drop = false
 +		}
 +		if drop && !cleared[id] {
 +			cleared[id] = true
@@ -607,9 +614,10 @@ index 000000000..afd32ca25
 +	return true
 +}
 +
-+// smallResult reports whether result is shorter than minBytes and carries no
-+// attachment, so that clearing it is not worth what it takes away.
-+func smallResult(result *chat.Message, minBytes int) bool {
++// notWorthClearing reports whether result is shorter than minBytes and
++// carries no attachment, so that clearing it would save less than it takes
++// away.
++func notWorthClearing(result *chat.Message, minBytes int) bool {
 +	return toolResultTextualBytes(result) < minBytes && resultAttachments(result) == 0
 +}
 +
@@ -704,16 +712,16 @@ index 000000000..afd32ca25
 +	case attachments > 1:
 +		size += fmt.Sprintf(" and %d attachments", attachments)
 +	}
-+	return fmt.Sprintf("[Note from the agent runtime: %s(%s) returned %s here. You read them in full at the time, "+
++	return fmt.Sprintf("[Note from the agent runtime: your call %s(%s) returned %s here. You read them in full at the time, "+
 +		"and your later replies were written with them. They were then set aside to save space. "+
 +		"Call the tool again if you need the text.]", name, args, size)
 +}
 diff --git a/pkg/session/coldclear_test.go b/pkg/session/coldclear_test.go
 new file mode 100644
-index 000000000..7ab73cbe0
+index 000000000..c2c116e53
 --- /dev/null
 +++ b/pkg/session/coldclear_test.go
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,278 @@
 +// This file is not part of upstream docker-agent: Agentry's build adds it
 +// (cold-cache-clear.patch in github.com/blaktron/agentry-dockerimages).
 +
@@ -788,7 +796,7 @@ index 000000000..7ab73cbe0
 +	for _, id := range kept {
 +		assert.True(t, strings.HasPrefix(got[id], "result of "), "%s should be whole: %q", id, got[id])
 +	}
-+	assert.Equal(t, `[Note from the agent runtime: fs_read({"path":"a.go"}) returned 27 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["t1-0"])
++	assert.Equal(t, `[Note from the agent runtime: your call fs_read({"path":"a.go"}) returned 27 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, got["t1-0"])
 +}
 +
 +func TestColdClearKeepsOnlyTheNewestBrowserResultsInsideKeptTurns(t *testing.T) {
@@ -799,7 +807,7 @@ index 000000000..7ab73cbe0
 +
 +	require.True(t, sess.ClearColdToolResults(coldConfig))
 +	got := toolResults(sess.GetMessages(coldAgent()))
-+	assert.True(t, strings.HasPrefix(got["t1-0"], "[Note from the agent runtime: browser_snapshot({})"))
++	assert.True(t, strings.HasPrefix(got["t1-0"], "[Note from the agent runtime: your call browser_snapshot({})"))
 +	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-1"])
 +	assert.Equal(t, "result of browser_snapshot in turn 1", got["t1-2"])
 +}
@@ -836,7 +844,7 @@ index 000000000..7ab73cbe0
 +		}
 +		assert.NotContains(t, m.Content, resultSecret)
 +		assert.Nil(t, m.MultiContent)
-+		assert.Equal(t, `[Note from the agent runtime: fs_read({"path":".env","token":"[REDACTED]"}) returned 34 bytes and 1 attachment here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, m.Content)
++		assert.Equal(t, `[Note from the agent runtime: your call fs_read({"path":".env","token":"[REDACTED]"}) returned 34 bytes and 1 attachment here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]`, m.Content)
 +	}
 +	// The stored result is the original.
 +	assert.Contains(t, sess.Messages[2].Message.Message.Content, resultSecret)
@@ -864,10 +872,11 @@ index 000000000..7ab73cbe0
 +	sess := New()
 +	sized(sess, 1, "fs_read", 4095, false)
 +	sized(sess, 2, "fs_read", 4096, false)
-+	sized(sess, 3, "browser_snapshot", 10, false)
++	sized(sess, 3, "browser_snapshot", 1000, false)
 +	sized(sess, 4, "screenshot", 10, true)
-+	sized(sess, 5, "fs_read", 1, false)
++	sized(sess, 5, "browser_snapshot", 10, false)
 +	sized(sess, 6, "fs_read", 1, false)
++	sized(sess, 7, "fs_read", 1, false)
 +	sess.AddMessage(UserMessage("the question after the pause"))
 +
 +	c := coldConfig
@@ -876,10 +885,11 @@ index 000000000..7ab73cbe0
 +	require.True(t, sess.ClearColdToolResults(c))
 +	got := toolResults(sess.GetMessages(coldAgent()))
 +	assert.Equal(t, strings.Repeat("x", 4095), got["t1-0"], "a result under min_bytes stays")
++	assert.Equal(t, strings.Repeat("x", 10), got["t5-0"], "a browser result shorter than its placeholder stays")
 +	for _, id := range []string{"t2-0", "t3-0", "t4-0"} {
 +		assert.True(t, strings.HasPrefix(got[id], "[Note from the agent runtime: "), "%s should be cleared: %q", id, got[id])
 +	}
-+	assert.Equal(t, "[Note from the agent runtime: screenshot({}) returned 10 bytes and 1 attachment"+
++	assert.Equal(t, "[Note from the agent runtime: your call screenshot({}) returned 10 bytes and 1 attachment"+
 +		" here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space."+
 +		" Call the tool again if you need the text.]", got["t4-0"])
 +
@@ -899,7 +909,7 @@ index 000000000..7ab73cbe0
 +	assert.Contains(t, p, "You read them in full at the time")
 +	assert.Contains(t, p, "your later replies were written with them")
 +	assert.Contains(t, p, "set aside to save space")
-+	assert.Contains(t, p, `fs_read({"path":"a.go"}) returned 9 bytes`)
++	assert.Contains(t, p, `your call fs_read({"path":"a.go"}) returned 9 bytes`)
 +	for _, empty := range []string{"returned nothing", "no result", "empty"} {
 +		assert.NotContains(t, p, empty)
 +	}
@@ -909,7 +919,7 @@ index 000000000..7ab73cbe0
 +	t.Parallel()
 +	args := `{"query":"` + strings.Repeat("é", 150) + `"}`
 +	p := coldClearPlaceholder(tools.ToolCall{Function: tools.FunctionCall{Name: "search", Arguments: args}}, &chat.Message{Content: "x"})
-+	inner := strings.TrimSuffix(strings.TrimPrefix(p, "[Note from the agent runtime: search("), ") returned 1 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]")
++	inner := strings.TrimSuffix(strings.TrimPrefix(p, "[Note from the agent runtime: your call search("), ") returned 1 bytes here. You read them in full at the time, and your later replies were written with them. They were then set aside to save space. Call the tool again if you need the text.]")
 +	assert.True(t, utf8.ValidString(inner))
 +	assert.True(t, strings.HasSuffix(inner, "…"))
 +	assert.LessOrEqual(t, len(strings.TrimSuffix(inner, "…")), coldClearArgsMax)
@@ -954,7 +964,7 @@ index 000000000..7ab73cbe0
 +
 +	// The compaction's input carries the placeholder, not the original.
 +	compaction, _, _ := sess.CompactionInput()
-+	assert.True(t, strings.HasPrefix(toolResults(compaction)["t1-0"], "[Note from the agent runtime: fs_read"))
++	assert.True(t, strings.HasPrefix(toolResults(compaction)["t1-0"], "[Note from the agent runtime: your call fs_read"))
 +	assert.Equal(t, "result of fs_read in turn 1", sess.Messages[2].Message.Message.Content)
 +}
 +
