@@ -24,10 +24,10 @@ index 78c4e418f..f8546a4d1 100644
  	return a.numHistoryItems
  }
 diff --git a/pkg/agent/opts.go b/pkg/agent/opts.go
-index 8e207938f..abc49e239 100644
+index 75e21a10d..3ef69f261 100644
 --- a/pkg/agent/opts.go
 +++ b/pkg/agent/opts.go
-@@ -301,6 +301,14 @@ func WithCompactionNotes(path string) Opt {
+@@ -304,6 +304,14 @@ func WithCompactionNotes(path string) Opt {
  	}
  }
  
@@ -72,10 +72,10 @@ index 000000000..854371d2e
 +	assert.False(t, cfg.Agents[0].LengthRecovery, "absent is off")
 +}
 diff --git a/pkg/config/latest/types.go b/pkg/config/latest/types.go
-index 5b006ed60..387e76a49 100644
+index 0a27fa78f..e5b4d1626 100644
 --- a/pkg/config/latest/types.go
 +++ b/pkg/config/latest/types.go
-@@ -794,6 +794,11 @@ type AgentConfig struct {
+@@ -797,6 +797,11 @@ type AgentConfig struct {
  	// compaction summary ends by pointing the agent back to. Absent, the
  	// summary is unchanged. Added by Agentry's build.
  	CompactionNotes string `json:"compaction_notes,omitempty" yaml:"compaction_notes,omitempty"`
